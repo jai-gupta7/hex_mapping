@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>H3 Hex Tester</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="control-panel">
+        <p class="eyebrow">Uber H3 Playground</p>
+        <h1>Hexagon Resolution Tester</h1>
+        <p class="subtitle">
+          Explore H3 cells around a center point with a lightweight standalone map.
+        </p>
+
+        <div class="field-group">
+          <label for="resolution">Resolution</label>
+          <div class="slider-row">
+            <input id="resolution" type="range" min="0" max="15" value="8" />
+            <span id="resolution-value">8</span>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label for="ring-size">Grid Disk Radius</label>
+          <div class="slider-row">
+            <input id="ring-size" type="range" min="0" max="6" value="3" />
+            <span id="ring-size-value">3</span>
+          </div>
+        </div>
+
+        <div class="field-grid">
+          <div class="field-group">
+            <label for="lat-input">Latitude</label>
+            <input id="lat-input" type="number" step="0.0001" value="28.4595" />
+          </div>
+
+          <div class="field-group">
+            <label for="lng-input">Longitude</label>
+            <input id="lng-input" type="number" step="0.0001" value="77.0266" />
+          </div>
+        </div>
+
+        <div class="action-row">
+          <button id="recenter-btn" type="button">Update Center</button>
+          <button id="reset-btn" type="button" class="ghost-button">Reset</button>
+        </div>
+
+        <div class="stats-card">
+          <p><span class="stat-label">Center Cell</span><span id="center-cell">-</span></p>
+          <p><span class="stat-label">Visible Hexagons</span><span id="hex-count">-</span></p>
+          <p><span class="stat-label">Clicked Cell</span><span id="selected-cell">Click a hex</span></p>
+        </div>
+
+        <p id="status-message" class="status-message" hidden></p>
+
+        <p class="hint">
+          Tip: click anywhere on the map to move the center and redraw the H3 grid.
+        </p>
+      </aside>
+
+      <main class="map-panel">
+        <div id="map"></div>
+      </main>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="https://unpkg.com/h3-js@4.1.0"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
