@@ -20,6 +20,8 @@ The app looks for real boundary data at:
 data/pincodes.geojson
 ```
 
+This repo currently includes a focused NCR starter file at that path. It contains Gurgaon/Haryana NCR and adjacent Uttar Pradesh NCR districts from `er-data-storage/postal-code-data`. Delhi PIN-code boundaries were not available in that source's state-wise files, so Delhi coverage still needs a separate dataset if exact Delhi PIN polygons are required.
+
 If that file is missing, it falls back to:
 
 ```text
