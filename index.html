@@ -60,6 +60,7 @@
 
         <div class="action-row">
           <button id="build-zones-btn" type="button">Build PIN Zones</button>
+          <button id="export-zones-btn" type="button" class="ghost-button">Export JSON</button>
           <button id="reset-btn" type="button" class="ghost-button">Reset</button>
         </div>
 
@@ -78,8 +79,8 @@
 
         <p class="hint">
           Click the map to move the branch point. Use the polygon tool to draw a custom
-          zone. Custom zones must stay inside the selected PIN-code hex coverage and
-          must touch the parent outer boundary or an existing custom zone.
+          zone. Drawn cells are removed from any existing/default zone they overlap,
+          then saved as a new custom zone.
         </p>
       </aside>
 

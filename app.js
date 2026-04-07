@@ -29,11 +29,7 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
 const drawLayer = new L.FeatureGroup().addTo(map);
 map.addControl(
   new L.Control.Draw({
-    edit: {
-      featureGroup: drawLayer,
-      edit: false,
-      remove: true,
-    },
+    edit: false,
     draw: {
       circle: false,
       circlemarker: false,
@@ -60,6 +56,7 @@ const controls = {
   latInput: document.getElementById("lat-input"),
   lngInput: document.getElementById("lng-input"),
   buildZonesButton: document.getElementById("build-zones-btn"),
+  exportZonesButton: document.getElementById("export-zones-btn"),
   resetButton: document.getElementById("reset-btn"),
   datasetName: document.getElementById("dataset-name"),
   radiusLabel: document.getElementById("radius-label"),
@@ -76,11 +73,13 @@ const state = {
   pincodeFeatures: [],
   selectedZones: [],
   customZones: [],
+  workingZones: [],
   parentCells: new Set(),
   selectedPinCodes: [],
   datasetName: "Loading...",
   radiusKm: 5,
   isDrawing: false,
+  customZoneSequence: 0,
 };
 
 const baseZoneLayer = L.layerGroup().addTo(map);
@@ -112,10 +111,11 @@ function wireEvents() {
   controls.serviceRadius.addEventListener("change", rebuildZones);
   controls.latInput.addEventListener("change", rebuildZones);
   controls.lngInput.addEventListener("change", rebuildZones);
+  controls.exportZonesButton.addEventListener("click", exportZoneJson);
 
   controls.resetButton.addEventListener("click", async () => {
     state.center = { ...DEFAULT_CENTER };
-    state.customZones = [];
+    state.customZoneSequence = 0;
     drawLayer.clearLayers();
     syncCenterInputs();
     await rebuildZones();
@@ -148,7 +148,8 @@ function wireEvents() {
         deletedIds.add(layer.zoneId);
       }
     });
-    state.customZones = state.customZones.filter((zone) => !deletedIds.has(zone.id));
+    state.workingZones = state.workingZones.filter((zone) => !deletedIds.has(zone.id));
+    state.customZones = state.workingZones.filter((zone) => zone.source === "custom");
     renderAllZones();
   });
 }
@@ -216,16 +217,28 @@ async function rebuildZones() {
     }
 
     state.selectedPinCodes = selectedFeatures.map((item) => item.id);
+    const assignedCells = new Set();
+
     selectedFeatures.forEach((item, index) => {
       const cells = featureToIntersectingCells(item.feature, resolution);
-      state.selectedZones.push({
-        id: item.id,
+      const ownedCells = cells.filter((cell) => !assignedCells.has(cell));
+      cells.forEach((cell) => state.parentCells.add(cell));
+      ownedCells.forEach((cell) => assignedCells.add(cell));
+
+      const zone = {
+        id: `pincode-${item.id}`,
         label: item.id,
         color: PINCODE_COLORS[index % PINCODE_COLORS.length],
+        source: "pincode",
+        parentPincodes: [item.id],
         sourceFeature: item.feature,
-        cells,
-      });
-      cells.forEach((cell) => state.parentCells.add(cell));
+        cells: ownedCells,
+      };
+
+      if (zone.cells.length) {
+        state.selectedZones.push(zone);
+        state.workingZones.push(zone);
+      }
     });
 
     renderRadiusCircle();
@@ -242,8 +255,10 @@ async function rebuildZones() {
 function clearZoneState() {
   state.selectedZones = [];
   state.customZones = [];
+  state.workingZones = [];
   state.parentCells = new Set();
   state.selectedPinCodes = [];
+  state.customZoneSequence = 0;
   drawLayer.clearLayers();
   baseZoneLayer.clearLayers();
   customZoneLayer.clearLayers();
@@ -286,6 +301,8 @@ function handleDrawnPolygon(layer) {
     const selectedCells = featureToIntersectingCells(feature, resolution);
     const parentSelectedCells = selectedCells.filter((cell) => state.parentCells.has(cell));
     const outsideCells = selectedCells.filter((cell) => !state.parentCells.has(cell));
+    const selectedCellSet = new Set(parentSelectedCells);
+    const ownerByCell = getCellOwnerMap();
 
     if (!parentSelectedCells.length) {
       showStatus("The drawn polygon does not select any H3 cells inside the parent PIN-code coverage.");
@@ -297,29 +314,66 @@ function handleDrawnPolygon(layer) {
       return;
     }
 
-    if (overlapsExistingCustomZone(parentSelectedCells)) {
-      showStatus("Custom zone rejected. It overlaps an existing custom zone.");
+    if (getConnectedCellComponents(parentSelectedCells).length > 1) {
+      showStatus("Custom zone rejected. Draw one connected H3-cell area at a time.");
       return;
     }
 
-    if (!sharesAllowedBoundary(parentSelectedCells)) {
+    if (!sharesAllowedBoundary(parentSelectedCells, ownerByCell)) {
       showStatus(
-        "Custom zone rejected. It creates an isolated island. Draw a polygon that shares a boundary with the parent outer edge or an existing custom zone."
+        "Custom zone rejected. It creates an isolated island. Draw a polygon that touches the parent outer boundary or an existing zone boundary."
       );
       return;
     }
 
-    const zoneId = `custom-${Date.now()}`;
-    layer.zoneId = zoneId;
-    drawLayer.addLayer(layer);
-    state.customZones.push({
+    const affectedZoneIds = new Set(parentSelectedCells.map((cell) => ownerByCell.get(cell)).filter(Boolean));
+    const affectedParentPincodes = uniqueValues(
+      state.workingZones
+        .filter((zone) => affectedZoneIds.has(zone.id))
+        .flatMap((zone) => zone.parentPincodes || [])
+    );
+    const nextZones = [];
+
+    state.workingZones.forEach((zone) => {
+      const isAffected = zone.cells.some((cell) => selectedCellSet.has(cell));
+
+      if (!isAffected) {
+        nextZones.push(zone);
+        return;
+      }
+
+      const remainingCells = zone.cells.filter((cell) => !selectedCellSet.has(cell));
+      const components = getConnectedCellComponents(remainingCells);
+
+      components.forEach((component, componentIndex) => {
+        nextZones.push({
+          ...zone,
+          id: `${zone.id}-derived-${Date.now()}-${componentIndex}`,
+          label: buildDerivedZoneLabel(zone.label, components.length, componentIndex),
+          source: "derived",
+          cells: component,
+        });
+      });
+    });
+
+    const zoneId = `custom-${state.customZoneSequence + 1}`;
+    state.customZoneSequence += 1;
+    nextZones.push({
       id: zoneId,
-      label: `Custom Zone ${state.customZones.length + 1}`,
-      color: CUSTOM_COLORS[state.customZones.length % CUSTOM_COLORS.length],
+      label: `Custom Zone ${state.customZoneSequence}`,
+      color: CUSTOM_COLORS[(state.customZoneSequence - 1) % CUSTOM_COLORS.length],
+      source: "custom",
+      parentPincodes: affectedParentPincodes,
       cells: parentSelectedCells,
     });
+
+    state.workingZones = nextZones;
+    state.customZones = state.workingZones.filter((zone) => zone.source === "custom");
     renderAllZones();
-    showStatus(`Created ${parentSelectedCells.length} H3-cell custom zone.`, "success");
+    showStatus(
+      `Created ${parentSelectedCells.length} H3-cell custom zone and rebuilt ${affectedZoneIds.size} affected zone(s).`,
+      "success"
+    );
   } catch (error) {
     showStatus(`Unable to create custom zone: ${error.message}`);
   }
@@ -329,16 +383,13 @@ function renderAllZones(shouldFitBounds = false) {
   baseZoneLayer.clearLayers();
   customZoneLayer.clearLayers();
 
-  const customCellSet = new Set(state.customZones.flatMap((zone) => zone.cells));
   const bounds = [];
 
-  state.selectedZones.forEach((zone) => {
-    const remainingCells = zone.cells.filter((cell) => !customCellSet.has(cell));
-    renderCells(remainingCells, zone.color, baseZoneLayer, `${zone.label} remaining`, 0.18, bounds);
-  });
-
-  state.customZones.forEach((zone) => {
-    renderCells(zone.cells, zone.color, customZoneLayer, zone.label, 0.55, bounds);
+  state.workingZones.forEach((zone) => {
+    const isCustom = zone.source === "custom";
+    const layer = isCustom ? customZoneLayer : baseZoneLayer;
+    const fillOpacity = isCustom ? 0.55 : zone.source === "derived" ? 0.28 : 0.18;
+    renderCells(zone.cells, zone.color, layer, zone.label, fillOpacity, bounds);
   });
 
   updateStats();
@@ -364,7 +415,9 @@ function renderCells(cells, color, layerGroup, label, fillOpacity, bounds) {
     polygon.bindPopup(buildPopupMarkup(label, cell));
     polygon.on("click", async (event) => {
       controls.selectedCell.textContent = cell;
-      await updateBranchPoint(event.latlng);
+      if (!state.isDrawing) {
+        await updateBranchPoint(event.latlng);
+      }
     });
     polygon.addTo(layerGroup);
   });
@@ -400,23 +453,67 @@ function cellToGeoJsonFeature(cell) {
   return turf.polygon([boundary]);
 }
 
-function overlapsExistingCustomZone(cells) {
-  const cellSet = new Set(cells);
-  return state.customZones.some((zone) => zone.cells.some((cell) => cellSet.has(cell)));
-}
-
-function sharesAllowedBoundary(cells) {
-  const cellSet = new Set(cells);
-  const existingCustomCells = new Set(state.customZones.flatMap((zone) => zone.cells));
-
+function sharesAllowedBoundary(cells, ownerByCell) {
   return cells.some((cell) => {
+    const owner = ownerByCell.get(cell);
     const neighbors = h3.gridDisk(cell, 1).filter((neighbor) => neighbor !== cell);
+
     return neighbors.some((neighbor) => {
       const touchesParentOuterEdge = !state.parentCells.has(neighbor);
-      const touchesExistingCustomZone = existingCustomCells.has(neighbor);
-      return touchesParentOuterEdge || touchesExistingCustomZone;
+      const neighborOwner = ownerByCell.get(neighbor);
+      const touchesAnotherZone = Boolean(owner && neighborOwner && neighborOwner !== owner);
+      return touchesParentOuterEdge || touchesAnotherZone;
     });
   });
+}
+
+function getCellOwnerMap() {
+  const ownerByCell = new Map();
+
+  state.workingZones.forEach((zone) => {
+    zone.cells.forEach((cell) => {
+      ownerByCell.set(cell, zone.id);
+    });
+  });
+
+  return ownerByCell;
+}
+
+function getConnectedCellComponents(cells) {
+  const unvisited = new Set(cells);
+  const components = [];
+
+  while (unvisited.size) {
+    const start = unvisited.values().next().value;
+    const component = [];
+    const stack = [start];
+    unvisited.delete(start);
+
+    while (stack.length) {
+      const cell = stack.pop();
+      component.push(cell);
+
+      h3.gridDisk(cell, 1)
+        .filter((neighbor) => neighbor !== cell && unvisited.has(neighbor))
+        .forEach((neighbor) => {
+          unvisited.delete(neighbor);
+          stack.push(neighbor);
+        });
+    }
+
+    components.push(component);
+  }
+
+  return components;
+}
+
+function buildDerivedZoneLabel(label, componentCount, componentIndex) {
+  const suffix = componentCount > 1 ? ` Part ${componentIndex + 1}` : "";
+  return `${label} Remainder${suffix}`;
+}
+
+function uniqueValues(values) {
+  return Array.from(new Set(values.filter(Boolean)));
 }
 
 function drawCenterMarker() {
@@ -455,12 +552,8 @@ function updateStats() {
   controls.customZoneCount.textContent = String(state.customZones.length);
   controls.zoneList.innerHTML = "";
 
-  state.selectedZones.forEach((zone) => {
-    appendZoneListItem(zone.label, zone.cells.length, zone.color);
-  });
-
-  state.customZones.forEach((zone) => {
-    appendZoneListItem(zone.label, zone.cells.length, zone.color);
+  state.workingZones.forEach((zone) => {
+    appendZoneListItem(`${zone.label} (${zone.source})`, zone.cells.length, zone.color);
   });
 }
 
@@ -470,6 +563,41 @@ function appendZoneListItem(label, cellCount, color) {
   row.style.setProperty("--zone-color", color);
   row.innerHTML = `<span>${label}</span><span>${cellCount} cells</span>`;
   controls.zoneList.appendChild(row);
+}
+
+function exportZoneJson() {
+  if (!state.workingZones.length) {
+    showStatus("Build zones before exporting.");
+    return;
+  }
+
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    resolution: getResolution(),
+    center: state.center,
+    radiusKm: state.radiusKm,
+    selectedPinCodes: state.selectedPinCodes,
+    zones: state.workingZones.map((zone) => ({
+      id: zone.id,
+      name: zone.label,
+      source: zone.source,
+      parentPincodes: zone.parentPincodes || [],
+      color: zone.color,
+      cellCount: zone.cells.length,
+      cells: zone.cells,
+    })),
+  };
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `h3-zone-export-${Date.now()}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+  showStatus("Exported current H3 zone arrangement as JSON.", "success");
 }
 
 function buildPopupMarkup(label, cell) {

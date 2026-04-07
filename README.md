@@ -8,9 +8,20 @@ A standalone browser app for testing PIN-code zone planning with Uber H3 hexagon
 - Cap the number of selected PIN codes for performance in dense areas
 - Convert selected PIN-code polygons to H3 cells at resolution 8 or 9
 - Draw temporary custom zones with Leaflet Draw
+- Repartition affected zones by H3-cell ownership when a custom zone is drawn
+- Export the current H3 zone arrangement as JSON
 - Reject custom zones outside the parent PIN-code coverage
 - Reject isolated/doughnut-like custom zones that do not share an allowed boundary
 - Inspect cell ids and approximate cell area
+
+## Zone Model
+
+PIN-code polygons are only the seed data. After the first custom polygon is drawn, the app treats zones as H3-cell ownership groups:
+
+- drawn polygon cells are moved into a new custom zone
+- affected existing/default zones lose those cells
+- remaining affected zone cells are split into connected derived zones
+- the exported JSON is the source-of-truth representation for the current zone arrangement
 
 ## PIN Code Boundary Data
 
