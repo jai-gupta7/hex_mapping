@@ -1,0 +1,120 @@
+{
+  "type": "FeatureCollection",
+  "name": "sample_pincode_boundaries_for_testing_only",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "pincode": "122001",
+        "name": "Sample Gurgaon Central"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [76.9900, 28.4300],
+            [77.0500, 28.4300],
+            [77.0500, 28.4900],
+            [76.9900, 28.4900],
+            [76.9900, 28.4300]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "pincode": "122002",
+        "name": "Sample Gurgaon East"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.0500, 28.4300],
+            [77.1100, 28.4300],
+            [77.1100, 28.4900],
+            [77.0500, 28.4900],
+            [77.0500, 28.4300]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "pincode": "122003",
+        "name": "Sample Gurgaon South"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [76.9900, 28.3700],
+            [77.0500, 28.3700],
+            [77.0500, 28.4300],
+            [76.9900, 28.4300],
+            [76.9900, 28.3700]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "pincode": "122004",
+        "name": "Sample Gurgaon South East"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.0500, 28.3700],
+            [77.1100, 28.3700],
+            [77.1100, 28.4300],
+            [77.0500, 28.4300],
+            [77.0500, 28.3700]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "pincode": "122005",
+        "name": "Sample Gurgaon North"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [76.9900, 28.4900],
+            [77.0500, 28.4900],
+            [77.0500, 28.5500],
+            [76.9900, 28.5500],
+            [76.9900, 28.4900]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "pincode": "122006",
+        "name": "Sample Gurgaon North East"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.0500, 28.4900],
+            [77.1100, 28.4900],
+            [77.1100, 28.5500],
+            [77.0500, 28.5500],
+            [77.0500, 28.4900]
+          ]
+        ]
+      }
+    }
+  ]
+}

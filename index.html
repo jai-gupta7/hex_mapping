@@ -3,39 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>H3 Hex Tester</title>
+    <title>H3 PIN Code Zone Planner</title>
     <link
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
       crossorigin=""
     />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"
+    />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div class="app-shell">
       <aside class="control-panel">
-        <p class="eyebrow">Uber H3 Playground</p>
-        <h1>Hexagon Resolution Tester</h1>
+        <p class="eyebrow">Uber H3 Zone Planner</p>
+        <h1>PIN Code Hex Mapping</h1>
         <p class="subtitle">
-          Explore H3 cells around a center point with a lightweight standalone map.
+          Select nearby PIN-code boundaries, convert them to H3 cells, then draw valid
+          boundary-sharing custom zones.
         </p>
-
-        <div class="field-group">
-          <label for="resolution">Resolution</label>
-          <div class="slider-row">
-            <input id="resolution" type="range" min="0" max="15" value="8" />
-            <span id="resolution-value">8</span>
-          </div>
-        </div>
-
-        <div class="field-group">
-          <label for="ring-size">Grid Disk Radius</label>
-          <div class="slider-row">
-            <input id="ring-size" type="range" min="0" max="6" value="3" />
-            <span id="ring-size-value">3</span>
-          </div>
-        </div>
 
         <div class="field-grid">
           <div class="field-group">
@@ -49,21 +38,42 @@
           </div>
         </div>
 
+        <div class="field-grid">
+          <div class="field-group">
+            <label for="pincode-count">PIN codes to cover</label>
+            <input id="pincode-count" type="number" min="1" max="25" step="1" value="4" />
+          </div>
+
+          <div class="field-group">
+            <label for="resolution">H3 resolution</label>
+            <select id="resolution">
+              <option value="8" selected>Resolution 8</option>
+              <option value="9">Resolution 9</option>
+            </select>
+          </div>
+        </div>
+
         <div class="action-row">
-          <button id="recenter-btn" type="button">Update Center</button>
+          <button id="build-zones-btn" type="button">Build PIN Zones</button>
           <button id="reset-btn" type="button" class="ghost-button">Reset</button>
         </div>
 
         <div class="stats-card">
-          <p><span class="stat-label">Center Cell</span><span id="center-cell">-</span></p>
-          <p><span class="stat-label">Visible Hexagons</span><span id="hex-count">-</span></p>
-          <p><span class="stat-label">Clicked Cell</span><span id="selected-cell">Click a hex</span></p>
+          <p><span class="stat-label">Dataset</span><span id="dataset-name">Loading...</span></p>
+          <p><span class="stat-label">Selected PIN codes</span><span id="selected-pins">-</span></p>
+          <p><span class="stat-label">Parent H3 cells</span><span id="parent-cell-count">-</span></p>
+          <p><span class="stat-label">Custom zones</span><span id="custom-zone-count">0</span></p>
+          <p><span class="stat-label">Clicked cell</span><span id="selected-cell">Click a hex</span></p>
         </div>
+
+        <div class="zone-list" id="zone-list" aria-live="polite"></div>
 
         <p id="status-message" class="status-message" hidden></p>
 
         <p class="hint">
-          Tip: click anywhere on the map to move the center and redraw the H3 grid.
+          Click the map to move the center. Use the polygon tool to draw a custom
+          zone. Custom zones must stay inside the selected PIN-code hex coverage and
+          must touch the parent outer boundary or an existing custom zone.
         </p>
       </aside>
 
@@ -77,6 +87,8 @@
       integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
       crossorigin=""
     ></script>
+    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+    <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
     <script src="https://unpkg.com/h3-js@4.1.0"></script>
     <script src="./app.js"></script>
   </body>
