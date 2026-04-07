@@ -68,6 +68,7 @@ const state = {
   selectedPinCodes: [],
   datasetName: "Loading...",
   radiusKm: 5,
+  isDrawing: false,
 };
 
 const baseZoneLayer = L.layerGroup().addTo(map);
@@ -97,6 +98,8 @@ function wireEvents() {
   controls.resolution.addEventListener("change", rebuildZones);
   controls.pincodeCount.addEventListener("change", rebuildZones);
   controls.serviceRadius.addEventListener("change", rebuildZones);
+  controls.latInput.addEventListener("change", rebuildZones);
+  controls.lngInput.addEventListener("change", rebuildZones);
 
   controls.resetButton.addEventListener("click", async () => {
     state.center = { ...DEFAULT_CENTER };
@@ -107,13 +110,19 @@ function wireEvents() {
   });
 
   map.on("click", async (event) => {
-    state.center = {
-      lat: roundCoordinate(event.latlng.lat),
-      lng: roundCoordinate(event.latlng.lng),
-    };
-    syncCenterInputs();
-    drawCenterMarker();
-    await rebuildZones();
+    if (state.isDrawing) {
+      return;
+    }
+
+    await updateBranchPoint(event.latlng);
+  });
+
+  map.on(L.Draw.Event.DRAWSTART, () => {
+    state.isDrawing = true;
+  });
+
+  map.on(L.Draw.Event.DRAWSTOP, () => {
+    state.isDrawing = false;
   });
 
   map.on(L.Draw.Event.CREATED, (event) => {
@@ -327,11 +336,13 @@ function renderCells(cells, color, layerGroup, label, fillOpacity, bounds) {
       weight: 1,
       fillColor: color,
       fillOpacity,
+      bubblingMouseEvents: false,
     });
 
     polygon.bindPopup(buildPopupMarkup(label, cell));
-    polygon.on("click", () => {
+    polygon.on("click", async (event) => {
       controls.selectedCell.textContent = cell;
+      await updateBranchPoint(event.latlng);
     });
     polygon.addTo(layerGroup);
   });
@@ -473,6 +484,16 @@ function readCenterInputs() {
 function syncCenterInputs() {
   controls.latInput.value = String(state.center.lat);
   controls.lngInput.value = String(state.center.lng);
+}
+
+async function updateBranchPoint(latlng) {
+  state.center = {
+    lat: roundCoordinate(latlng.lat),
+    lng: roundCoordinate(latlng.lng),
+  };
+  syncCenterInputs();
+  drawCenterMarker();
+  await rebuildZones();
 }
 
 function getResolution() {
