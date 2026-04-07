@@ -58,6 +58,14 @@
           <input id="pincode-count" type="number" min="1" max="100" step="1" value="12" />
         </div>
 
+        <div class="field-group">
+          <label for="map-view">Map view</label>
+          <select id="map-view">
+            <option value="hex" selected>H3 hex zones</option>
+            <option value="boundary">Original PIN boundaries</option>
+          </select>
+        </div>
+
         <div class="action-row">
           <button id="build-zones-btn" type="button">Build PIN Zones</button>
           <button id="export-zones-btn" type="button" class="ghost-button">Export JSON</button>
@@ -80,7 +88,8 @@
         <p class="hint">
           Click the map to move the branch point. Use the polygon tool to draw a custom
           zone. Drawn cells are removed from any existing/default zone they overlap,
-          then saved as a new custom zone.
+          then saved as a new custom zone. Switch to original PIN boundaries when you
+          want to inspect the raw PIN-code coverage without hex cells.
         </p>
       </aside>
 

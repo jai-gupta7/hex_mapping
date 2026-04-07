@@ -50,6 +50,7 @@ map.addControl(
 );
 
 const controls = {
+  mapView: document.getElementById("map-view"),
   resolution: document.getElementById("resolution"),
   pincodeCount: document.getElementById("pincode-count"),
   serviceRadius: document.getElementById("service-radius"),
@@ -84,6 +85,7 @@ const state = {
 
 const baseZoneLayer = L.layerGroup().addTo(map);
 const customZoneLayer = L.layerGroup().addTo(map);
+const boundaryZoneLayer = L.layerGroup().addTo(map);
 const centerLayer = L.layerGroup().addTo(map);
 const radiusLayer = L.layerGroup().addTo(map);
 
@@ -111,6 +113,7 @@ function wireEvents() {
   controls.serviceRadius.addEventListener("change", rebuildZones);
   controls.latInput.addEventListener("change", rebuildZones);
   controls.lngInput.addEventListener("change", rebuildZones);
+  controls.mapView.addEventListener("change", () => renderAllZones(true));
   controls.exportZonesButton.addEventListener("click", exportZoneJson);
 
   controls.resetButton.addEventListener("click", async () => {
@@ -262,6 +265,7 @@ function clearZoneState() {
   drawLayer.clearLayers();
   baseZoneLayer.clearLayers();
   customZoneLayer.clearLayers();
+  boundaryZoneLayer.clearLayers();
   updateStats();
 }
 
@@ -290,6 +294,11 @@ function selectPincodesInRadius(center, radiusKm, maxCount) {
 }
 
 function handleDrawnPolygon(layer) {
+  if (getMapView() === "boundary") {
+    showStatus("Switch to H3 hex zones view before drawing a custom zone.");
+    return;
+  }
+
   if (!state.parentCells.size) {
     showStatus("Build PIN-code zones before drawing a custom zone.");
     return;
@@ -382,8 +391,20 @@ function handleDrawnPolygon(layer) {
 function renderAllZones(shouldFitBounds = false) {
   baseZoneLayer.clearLayers();
   customZoneLayer.clearLayers();
+  boundaryZoneLayer.clearLayers();
 
   const bounds = [];
+
+  if (getMapView() === "boundary") {
+    renderOriginalPincodeBoundaries(bounds);
+    updateStats();
+
+    if (shouldFitBounds && bounds.length) {
+      map.fitBounds(bounds, { padding: [28, 28] });
+    }
+
+    return;
+  }
 
   state.workingZones.forEach((zone) => {
     const isCustom = zone.source === "custom";
@@ -397,6 +418,37 @@ function renderAllZones(shouldFitBounds = false) {
   if (shouldFitBounds && bounds.length) {
     map.fitBounds(bounds, { padding: [28, 28] });
   }
+}
+
+function renderOriginalPincodeBoundaries(bounds) {
+  state.selectedZones.forEach((zone) => {
+    const layer = L.geoJSON(zone.sourceFeature, {
+      style: {
+        color: zone.color,
+        weight: 2,
+        fillColor: zone.color,
+        fillOpacity: 0.16,
+      },
+      onEachFeature: (_feature, featureLayer) => {
+        featureLayer.bindPopup(buildPincodePopupMarkup(zone));
+        featureLayer.on("click", async (event) => {
+          controls.selectedCell.textContent = `PIN ${zone.label}`;
+          if (!state.isDrawing) {
+            await updateBranchPoint(event.latlng);
+          }
+        });
+      },
+    });
+
+    layer.eachLayer((featureLayer) => {
+      const layerBounds = featureLayer.getBounds?.();
+      if (layerBounds) {
+        bounds.push(layerBounds.getNorthWest());
+        bounds.push(layerBounds.getSouthEast());
+      }
+    });
+    layer.addTo(boundaryZoneLayer);
+  });
 }
 
 function renderCells(cells, color, layerGroup, label, fillOpacity, bounds) {
@@ -611,6 +663,16 @@ function buildPopupMarkup(label, cell) {
   `;
 }
 
+function buildPincodePopupMarkup(zone) {
+  return `
+    <div class="hex-popup">
+      <strong>PIN ${zone.label}</strong>
+      <span>Original boundary</span>
+      <span>Mapped H3 cells: ${zone.cells.length}</span>
+    </div>
+  `;
+}
+
 function readCenterInputs() {
   const lat = Number(controls.latInput.value);
   const lng = Number(controls.lngInput.value);
@@ -648,6 +710,10 @@ async function updateBranchPoint(latlng) {
 
 function getResolution() {
   return Number(controls.resolution.value);
+}
+
+function getMapView() {
+  return controls.mapView.value;
 }
 
 function getPincodeCount() {

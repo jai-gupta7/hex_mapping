@@ -6,6 +6,7 @@ A standalone browser app for testing PIN-code zone planning with Uber H3 hexagon
 
 - Select PIN-code boundaries that intersect a rough branch radius around the center point
 - Cap the number of selected PIN codes for performance in dense areas
+- Switch between H3 hex-zone view and original PIN-code boundary view
 - Convert selected PIN-code polygons to H3 cells at resolution 8 or 9
 - Draw temporary custom zones with Leaflet Draw
 - Repartition affected zones by H3-cell ownership when a custom zone is drawn
