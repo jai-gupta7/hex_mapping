@@ -3,6 +3,18 @@ const PINCODE_GEOJSON_PATH = "./data/pincodes.geojson";
 const SAMPLE_GEOJSON_PATH = "./data/pincodes.sample.geojson";
 const PINCODE_COLORS = ["#59c3c3", "#f4a261", "#90be6d", "#f8961e", "#43aa8b", "#577590"];
 const CUSTOM_COLORS = ["#ef476f", "#9b5de5", "#f15bb5", "#fee440", "#00bbf9", "#00f5d4"];
+const PINCODE_PROPERTY_KEYS = [
+  "pincode",
+  "PINCODE",
+  "pin_code",
+  "PIN_CODE",
+  "pin",
+  "PIN",
+  "postal_code",
+  "POSTAL_CODE",
+  "postcode",
+  "POSTCODE",
+];
 
 const map = L.map("map", {
   zoomControl: true,
@@ -149,22 +161,32 @@ async function loadPincodeData() {
     }
     const geojson = await response.json();
     setPincodeData(geojson, "data/pincodes.geojson");
-  } catch {
+  } catch (error) {
     const response = await fetch(SAMPLE_GEOJSON_PATH);
     const geojson = await response.json();
     setPincodeData(geojson, "sample data");
-    showStatus("Using sample PIN-code polygons. Replace data/pincodes.geojson with a real boundary dataset.", "success");
+    showStatus(
+      `Using sample PIN-code polygons. Replace data/pincodes.geojson with a real boundary dataset. Reason: ${error.message}`,
+      "success"
+    );
   }
 }
 
 function setPincodeData(geojson, datasetName) {
   state.pincodeFeatures = geojson.features
-    .filter((feature) => ["Polygon", "MultiPolygon"].includes(feature.geometry?.type))
+    .filter((feature) => ["Polygon", "MultiPolygon"].includes(feature.geometry?.type) && getPincodeValue(feature))
     .map((feature, index) => ({
       id: getPincodeLabel(feature, index),
       feature,
       centroid: turf.centroid(feature),
     }));
+
+  if (!state.pincodeFeatures.length) {
+    throw new Error(
+      `${datasetName} does not look like PIN-code boundary data. Expected Polygon/MultiPolygon features with a six-digit PIN-code property.`
+    );
+  }
+
   state.datasetName = datasetName;
   controls.datasetName.textContent = datasetName;
 }
@@ -517,17 +539,19 @@ function getServiceRadius() {
 }
 
 function getPincodeLabel(feature, index) {
+  return getPincodeValue(feature) || `PIN-${index + 1}`;
+}
+
+function getPincodeValue(feature) {
   const props = feature.properties || {};
-  return (
-    props.pincode ||
-    props.PINCODE ||
-    props.pin_code ||
-    props.POSTAL_CODE ||
-    props.postal_code ||
-    props.name ||
-    props.Name ||
-    `PIN-${index + 1}`
-  );
+  const matchedValue = PINCODE_PROPERTY_KEYS.map((key) => props[key]).find((value) => value !== undefined && value !== null);
+
+  if (matchedValue === undefined) {
+    return null;
+  }
+
+  const textValue = String(matchedValue).trim();
+  return /^\d{6}$/.test(textValue) ? textValue : null;
 }
 
 function roundCoordinate(value) {
