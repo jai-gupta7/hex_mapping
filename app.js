@@ -44,11 +44,13 @@ map.addControl(
 const controls = {
   resolution: document.getElementById("resolution"),
   pincodeCount: document.getElementById("pincode-count"),
+  serviceRadius: document.getElementById("service-radius"),
   latInput: document.getElementById("lat-input"),
   lngInput: document.getElementById("lng-input"),
   buildZonesButton: document.getElementById("build-zones-btn"),
   resetButton: document.getElementById("reset-btn"),
   datasetName: document.getElementById("dataset-name"),
+  radiusLabel: document.getElementById("radius-label"),
   selectedPins: document.getElementById("selected-pins"),
   parentCellCount: document.getElementById("parent-cell-count"),
   customZoneCount: document.getElementById("custom-zone-count"),
@@ -65,11 +67,13 @@ const state = {
   parentCells: new Set(),
   selectedPinCodes: [],
   datasetName: "Loading...",
+  radiusKm: 5,
 };
 
 const baseZoneLayer = L.layerGroup().addTo(map);
 const customZoneLayer = L.layerGroup().addTo(map);
 const centerLayer = L.layerGroup().addTo(map);
+const radiusLayer = L.layerGroup().addTo(map);
 
 bootstrap();
 
@@ -92,6 +96,7 @@ function wireEvents() {
   controls.buildZonesButton.addEventListener("click", rebuildZones);
   controls.resolution.addEventListener("change", rebuildZones);
   controls.pincodeCount.addEventListener("change", rebuildZones);
+  controls.serviceRadius.addEventListener("change", rebuildZones);
 
   controls.resetButton.addEventListener("click", async () => {
     state.center = { ...DEFAULT_CENTER };
@@ -169,11 +174,13 @@ async function rebuildZones() {
     hideStatus();
 
     const resolution = getResolution();
-    const pincodeCount = getPincodeCount();
-    const selectedFeatures = selectNearbyPincodes(state.center, pincodeCount);
+    state.radiusKm = getServiceRadius();
+    const maxPincodeCount = getPincodeCount();
+    const selectedFeatures = selectPincodesInRadius(state.center, state.radiusKm, maxPincodeCount);
 
     if (!selectedFeatures.length) {
-      showStatus("No PIN-code boundary polygons are available to map.");
+      showStatus("No PIN-code boundaries intersect this branch radius. Increase the radius or move the branch point.");
+      renderRadiusCircle();
       return;
     }
 
@@ -190,9 +197,10 @@ async function rebuildZones() {
       cells.forEach((cell) => state.parentCells.add(cell));
     });
 
+    renderRadiusCircle();
     renderAllZones(true);
     showStatus(
-      `Mapped ${state.selectedZones.length} PIN-code zones to ${state.parentCells.size} H3 cells at resolution ${resolution}.`,
+      `Mapped ${state.selectedZones.length} PIN-code zones inside a ${state.radiusKm} km branch radius to ${state.parentCells.size} H3 cells at resolution ${resolution}.`,
       "success"
     );
   } catch (error) {
@@ -211,22 +219,28 @@ function clearZoneState() {
   updateStats();
 }
 
-function selectNearbyPincodes(center, count) {
+function selectPincodesInRadius(center, radiusKm, maxCount) {
   const centerPoint = turf.point([center.lng, center.lat]);
+  const radiusCircle = turf.circle(centerPoint, radiusKm, {
+    steps: 96,
+    units: "kilometers",
+  });
 
   return state.pincodeFeatures
     .map((item) => ({
       ...item,
       containsCenter: turf.booleanPointInPolygon(centerPoint, item.feature),
+      intersectsRadius: turf.booleanIntersects(item.feature, radiusCircle),
       distanceKm: turf.distance(centerPoint, item.centroid, { units: "kilometers" }),
     }))
+    .filter((item) => item.intersectsRadius || item.containsCenter)
     .sort((a, b) => {
       if (a.containsCenter !== b.containsCenter) {
         return a.containsCenter ? -1 : 1;
       }
       return a.distanceKm - b.distanceKm;
     })
-    .slice(0, count);
+    .slice(0, maxCount);
 }
 
 function handleDrawnPolygon(layer) {
@@ -385,8 +399,24 @@ function drawCenterMarker() {
     .addTo(centerLayer);
 }
 
+function renderRadiusCircle() {
+  radiusLayer.clearLayers();
+  L.circle([state.center.lat, state.center.lng], {
+    radius: state.radiusKm * 1000,
+    color: "#ef476f",
+    weight: 2,
+    opacity: 0.75,
+    fillColor: "#ef476f",
+    fillOpacity: 0.05,
+    dashArray: "8 8",
+  })
+    .bindTooltip(`${state.radiusKm} km branch radius`, { direction: "top" })
+    .addTo(radiusLayer);
+}
+
 function updateStats() {
   controls.datasetName.textContent = state.datasetName;
+  controls.radiusLabel.textContent = state.radiusKm ? `${state.radiusKm} km` : "-";
   controls.selectedPins.textContent = state.selectedPinCodes.length ? state.selectedPinCodes.join(", ") : "-";
   controls.parentCellCount.textContent = state.parentCells.size ? String(state.parentCells.size) : "-";
   controls.customZoneCount.textContent = String(state.customZones.length);
@@ -455,6 +485,14 @@ function getPincodeCount() {
     return 1;
   }
   return Math.min(count, state.pincodeFeatures.length || count);
+}
+
+function getServiceRadius() {
+  const radiusKm = Number(controls.serviceRadius.value);
+  if (!Number.isFinite(radiusKm) || radiusKm <= 0) {
+    return 1;
+  }
+  return Math.min(radiusKm, 100);
 }
 
 function getPincodeLabel(feature, index) {
