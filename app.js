@@ -381,6 +381,7 @@ function handleDrawnPolygon(layer) {
       color: CUSTOM_COLORS[(state.customZoneSequence - 1) % CUSTOM_COLORS.length],
       source: "custom",
       parentPincodes: affectedParentPincodes,
+      boundaryFeature: feature,
       cells: parentSelectedCells,
     });
 
@@ -411,9 +412,9 @@ function renderAllZones(shouldFitBounds = false) {
   renderPincodeGuides(bounds);
 
   if (getMapView() === "boundary") {
-    renderZoneBoundaries(bounds);
+    renderBoundaryModeZones(bounds);
     renderConstraintCells(bounds, "boundary");
-    renderSelectedCell(bounds);
+    renderSelectedCell();
     updateStats();
 
     if (shouldFitBounds && bounds.length) {
@@ -425,7 +426,7 @@ function renderAllZones(shouldFitBounds = false) {
 
   renderHexZones(bounds);
   renderConstraintCells(bounds, "hex");
-  renderSelectedCell(bounds);
+  renderSelectedCell();
 
   updateStats();
 
@@ -491,41 +492,37 @@ function renderPincodeGuides(bounds) {
   });
 }
 
-function renderZoneBoundaries(bounds) {
-  state.workingZones.forEach((zone) => {
-    const feature = zoneCellsToFeature(zone.cells);
-    if (!feature) {
-      return;
-    }
+function renderBoundaryModeZones(bounds) {
+  state.workingZones
+    .filter((zone) => zone.source === "custom" && zone.boundaryFeature)
+    .forEach((zone) => {
+      const layer = L.geoJSON(zone.boundaryFeature, {
+        bubblingMouseEvents: false,
+        style: {
+          color: zone.color,
+          weight: 3,
+          fillColor: zone.color,
+          fillOpacity: 0.18,
+        },
+        onEachFeature: (_feature, featureLayer) => {
+          featureLayer.bindPopup(buildZonePopupMarkup(zone));
+          featureLayer.on("click", () => {
+            state.selectedCell = null;
+            renderSelectedCell();
+            controls.selectedCell.textContent = zone.label;
+          });
+        },
+      });
 
-    const isCustom = zone.source === "custom";
-    const layer = L.geoJSON(feature, {
-      bubblingMouseEvents: false,
-      style: {
-        color: zone.color,
-        weight: isCustom ? 3 : zone.source === "derived" ? 2.4 : 2,
-        fillColor: zone.color,
-        fillOpacity: isCustom ? 0.22 : zone.source === "derived" ? 0.15 : 0.09,
-      },
-      onEachFeature: (_feature, featureLayer) => {
-        featureLayer.bindPopup(buildZonePopupMarkup(zone));
-        featureLayer.on("click", () => {
-          state.selectedCell = null;
-          renderSelectedCell();
-          controls.selectedCell.textContent = zone.label;
-        });
-      },
+      layer.eachLayer((featureLayer) => {
+        const layerBounds = featureLayer.getBounds?.();
+        if (layerBounds) {
+          bounds.push(layerBounds.getNorthWest());
+          bounds.push(layerBounds.getSouthEast());
+        }
+      });
+      layer.addTo(boundaryZoneLayer);
     });
-
-    layer.eachLayer((featureLayer) => {
-      const layerBounds = featureLayer.getBounds?.();
-      if (layerBounds) {
-        bounds.push(layerBounds.getNorthWest());
-        bounds.push(layerBounds.getSouthEast());
-      }
-    });
-    layer.addTo(boundaryZoneLayer);
-  });
 }
 
 function renderHexZones(bounds) {
@@ -562,6 +559,30 @@ function renderCells(cells, color, layerGroup, label, fillOpacity, bounds) {
 
 function renderConstraintCells(bounds, mode) {
   state.constraintCells.forEach((cell) => {
+    if (mode === "boundary") {
+      const [lat, lng] = h3.cellToLatLng(cell);
+      const marker = L.circleMarker([lat, lng], {
+        radius: 7,
+        color: CONSTRAINT_BORDER_COLOR,
+        weight: 2,
+        fillColor: CONSTRAINT_FILL_COLOR,
+        fillOpacity: 0.9,
+        dashArray: "3 3",
+        className: "constraint-cell",
+        bubblingMouseEvents: false,
+      });
+
+      bounds?.push({ lat, lng });
+      marker.bindPopup(buildConstraintPopupMarkup(cell));
+      marker.on("click", () => {
+        state.selectedCell = cell;
+        controls.selectedCell.textContent = `${cell} (constraint)`;
+        renderSelectedCell();
+      });
+      marker.addTo(constraintLayer);
+      return;
+    }
+
     const latLngs = h3.cellToBoundary(cell);
     latLngs.forEach((point) => bounds?.push(point));
 
@@ -589,6 +610,23 @@ function renderSelectedCell() {
   selectionLayer.clearLayers();
 
   if (!state.selectedCell) {
+    return;
+  }
+
+  if (getMapView() === "boundary") {
+    const [lat, lng] = h3.cellToLatLng(state.selectedCell);
+    const marker = L.circleMarker([lat, lng], {
+      radius: 9,
+      color: "#ffffff",
+      weight: 3,
+      fillColor: SELECTION_COLOR,
+      fillOpacity: 0.95,
+      className: "selected-cell",
+      bubblingMouseEvents: false,
+    });
+
+    marker.bindTooltip("Selected cell", { direction: "top" });
+    marker.addTo(selectionLayer);
     return;
   }
 
@@ -634,26 +672,6 @@ function cellToGeoJsonFeature(cell) {
   const boundary = h3.cellToBoundary(cell, true);
   boundary.push(boundary[0]);
   return turf.polygon([boundary]);
-}
-
-function zoneCellsToFeature(cells) {
-  if (!cells.length) {
-    return null;
-  }
-
-  const multiPolygon = h3.cellsToMultiPolygon(cells, true);
-  if (!multiPolygon.length) {
-    return null;
-  }
-
-  return {
-    type: "Feature",
-    properties: {},
-    geometry: {
-      type: multiPolygon.length === 1 ? "Polygon" : "MultiPolygon",
-      coordinates: multiPolygon.length === 1 ? multiPolygon[0] : multiPolygon,
-    },
-  };
 }
 
 function buildServiceAreaFeature(features) {
