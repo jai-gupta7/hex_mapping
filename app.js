@@ -408,11 +408,10 @@ function renderAllZones(shouldFitBounds = false) {
 
   const bounds = [];
 
-  renderServiceArea(bounds);
-  renderPincodeGuides(bounds);
-
   if (getMapView() === "boundary") {
     renderBoundaryModeZones(bounds);
+    renderPincodeGuides(bounds, "boundary");
+    renderServiceArea(bounds, "boundary");
     renderConstraintCells(bounds, "boundary");
     renderSelectedCell();
     updateStats();
@@ -424,6 +423,8 @@ function renderAllZones(shouldFitBounds = false) {
     return;
   }
 
+  renderServiceArea(bounds, "hex");
+  renderPincodeGuides(bounds, "hex");
   renderHexZones(bounds);
   renderConstraintCells(bounds, "hex");
   renderSelectedCell();
@@ -435,7 +436,7 @@ function renderAllZones(shouldFitBounds = false) {
   }
 }
 
-function renderServiceArea(bounds) {
+function renderServiceArea(bounds, mode) {
   if (!state.serviceAreaFeature) {
     return;
   }
@@ -444,9 +445,9 @@ function renderServiceArea(bounds) {
     interactive: false,
     style: {
       color: SERVICE_BORDER_COLOR,
-      weight: 4,
+      weight: mode === "boundary" ? 4.5 : 4,
       fillColor: SERVICE_BORDER_COLOR,
-      fillOpacity: 0.05,
+      fillOpacity: mode === "boundary" ? 0.035 : 0.05,
     },
   });
 
@@ -458,18 +459,21 @@ function renderServiceArea(bounds) {
     }
   });
   layer.addTo(serviceAreaLayer);
+  if (mode === "boundary") {
+    layer.bringToFront();
+  }
 }
 
-function renderPincodeGuides(bounds) {
+function renderPincodeGuides(bounds, mode) {
   state.selectedZones.forEach((zone) => {
     const layer = L.geoJSON(zone.sourceFeature, {
       bubblingMouseEvents: false,
       style: {
         color: GUIDE_BORDER_COLOR,
-        weight: 1.4,
-        opacity: 0.95,
+        weight: mode === "boundary" ? 1.8 : 1.4,
+        opacity: mode === "boundary" ? 1 : 0.95,
         fillOpacity: 0,
-        dashArray: "8 8",
+        dashArray: mode === "boundary" ? "7 7" : "8 8",
       },
       onEachFeature: (_feature, featureLayer) => {
         featureLayer.bindPopup(buildPincodePopupMarkup(zone));
@@ -489,6 +493,9 @@ function renderPincodeGuides(bounds) {
       }
     });
     layer.addTo(guideZoneLayer);
+    if (mode === "boundary") {
+      layer.bringToFront();
+    }
   });
 }
 
