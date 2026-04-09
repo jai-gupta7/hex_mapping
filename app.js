@@ -34,7 +34,11 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
 const drawLayer = new L.FeatureGroup().addTo(map);
 map.addControl(
   new L.Control.Draw({
-    edit: false,
+    edit: {
+      featureGroup: drawLayer,
+      edit: true,
+      remove: false,
+    },
     draw: {
       circle: false,
       circlemarker: false,
@@ -160,8 +164,20 @@ function wireEvents() {
     state.isDrawing = false;
   });
 
+  map.on(L.Draw.Event.EDITSTART, () => {
+    state.isDrawing = true;
+  });
+
+  map.on(L.Draw.Event.EDITSTOP, () => {
+    state.isDrawing = false;
+  });
+
   map.on(L.Draw.Event.CREATED, (event) => {
     handleDrawnPolygon(event.layer);
+  });
+
+  map.on(L.Draw.Event.EDITED, (event) => {
+    handleEditedZoneLayers(event.layers);
   });
 
 }
@@ -456,7 +472,253 @@ function handleDrawnPolygon(layer) {
   }
 }
 
+function handleEditedZoneLayers(layers) {
+  const snapshot = cloneZoneState();
+  const editedLayersByZone = new Map();
+
+  layers.eachLayer((layer) => {
+    if (!layer.zoneId) {
+      return;
+    }
+
+    if (!editedLayersByZone.has(layer.zoneId)) {
+      editedLayersByZone.set(layer.zoneId, []);
+    }
+
+    editedLayersByZone.get(layer.zoneId).push(layer);
+  });
+
+  try {
+    editedLayersByZone.forEach((zoneLayers, zoneId) => {
+      const feature = buildEditedFeature(zoneLayers);
+      applyEditedZoneBoundary(zoneId, feature);
+    });
+
+    renderAllZones();
+    showStatus("Updated zone boundaries and reassigned covered cells.", "success");
+  } catch (error) {
+    restoreZoneState(snapshot);
+    renderAllZones();
+    showStatus(`Unable to update zone boundary: ${error.message}`);
+  }
+}
+
+function applyEditedZoneBoundary(zoneId, feature) {
+  const zone = state.workingZones.find((item) => item.id === zoneId);
+  if (!zone) {
+    throw new Error("The edited zone could not be found.");
+  }
+
+  const resolution = getResolution();
+  const desiredCells = featureToContainedCells(feature, resolution).filter((cell) => state.parentCells.has(cell));
+  const outsideCells = featureToIntersectingCells(feature, resolution).filter((cell) => !state.parentCells.has(cell));
+
+  if (!desiredCells.length) {
+    throw new Error(`Zone ${zone.label} must still cover at least one H3 cell.`);
+  }
+
+  if (outsideCells.length) {
+    throw new Error(`Zone ${zone.label} extends outside the serviceability area.`);
+  }
+
+  if (getConnectedCellComponents(desiredCells).length > 1) {
+    throw new Error(`Zone ${zone.label} must remain one connected area.`);
+  }
+
+  const ownerByCell = getCellOwnerMap();
+  const affectedZoneIds = new Set(
+    [...desiredCells, ...zone.cells].map((cell) => ownerByCell.get(cell)).filter(Boolean)
+  );
+  affectedZoneIds.add(zoneId);
+
+  const affectedZones = state.workingZones.filter((item) => affectedZoneIds.has(item.id));
+  const affectedScope = uniqueValues([
+    ...desiredCells,
+    ...affectedZones.flatMap((item) => item.cells),
+  ]);
+  const desiredCellSet = new Set(desiredCells);
+  const reassignedZones = repartitionEditedZone(affectedZones, zoneId, desiredCellSet, affectedScope, feature);
+  const reassignedIds = new Set(reassignedZones.map((item) => item.id));
+
+  state.workingZones = [
+    ...state.workingZones.filter((item) => !affectedZoneIds.has(item.id)),
+    ...reassignedZones,
+  ];
+  state.customZones = state.workingZones.filter((item) => item.source === "custom");
+  state.hiddenZoneIds = new Set([...state.hiddenZoneIds].filter((item) => reassignedIds.has(item) || state.workingZones.some((zoneItem) => zoneItem.id === item)));
+}
+
+function repartitionEditedZone(affectedZones, editedZoneId, desiredCellSet, scopeCells, boundaryFeature) {
+  const initialAssignments = new Map();
+  const editedZone = affectedZones.find((zone) => zone.id === editedZoneId);
+
+  affectedZones.forEach((zone) => {
+    if (zone.id === editedZoneId) {
+      initialAssignments.set(zone.id, new Set(desiredCellSet));
+      return;
+    }
+
+    initialAssignments.set(
+      zone.id,
+      new Set(zone.cells.filter((cell) => !desiredCellSet.has(cell)))
+    );
+  });
+
+  const assignedCells = new Set(
+    [...initialAssignments.values()].flatMap((cellSet) => [...cellSet])
+  );
+  const poolCells = scopeCells.filter((cell) => !assignedCells.has(cell));
+
+  assignPoolCellsToNeighborZones(poolCells, initialAssignments, editedZoneId);
+
+  const nextZones = [];
+
+  affectedZones.forEach((zone) => {
+    const assignedSet = initialAssignments.get(zone.id) || new Set();
+    const assignedCellsForZone = [...assignedSet];
+
+    if (!assignedCellsForZone.length) {
+      return;
+    }
+
+    const components = getConnectedCellComponents(assignedCellsForZone);
+
+    components.forEach((component, componentIndex) => {
+      const isPrimaryComponent = componentIndex === 0;
+      const isEditedZone = zone.id === editedZoneId;
+
+      nextZones.push({
+        ...zone,
+        id: isPrimaryComponent ? zone.id : `${zone.id}-derived-${Date.now()}-${componentIndex}`,
+        label:
+          isPrimaryComponent || isEditedZone
+            ? zone.label
+            : buildDerivedZoneLabel(zone.label, components.length, componentIndex),
+        source: isPrimaryComponent ? zone.source : "derived",
+        boundaryFeature: isEditedZone && isPrimaryComponent ? boundaryFeature : undefined,
+        cells: component,
+      });
+    });
+  });
+
+  if (!nextZones.some((zone) => zone.id === editedZoneId) && editedZone) {
+    nextZones.push({
+      ...editedZone,
+      cells: [...desiredCellSet],
+      boundaryFeature,
+    });
+  }
+
+  return nextZones;
+}
+
+function assignPoolCellsToNeighborZones(poolCells, assignments, editedZoneId) {
+  if (!poolCells.length) {
+    return;
+  }
+
+  const poolSet = new Set(poolCells);
+  const queue = [];
+  const ownerByCell = new Map();
+
+  assignments.forEach((cellSet, zoneId) => {
+    if (zoneId === editedZoneId) {
+      return;
+    }
+
+    cellSet.forEach((cell) => {
+      ownerByCell.set(cell, zoneId);
+      queue.push(cell);
+    });
+  });
+
+  while (queue.length) {
+    const cell = queue.shift();
+    const zoneId = ownerByCell.get(cell);
+
+    getAdjacentCells(cell, new Set([...poolSet, ...ownerByCell.keys()])).forEach((neighbor) => {
+      if (!poolSet.has(neighbor) || ownerByCell.has(neighbor)) {
+        return;
+      }
+
+      ownerByCell.set(neighbor, zoneId);
+      assignments.get(zoneId)?.add(neighbor);
+      queue.push(neighbor);
+    });
+  }
+
+  poolCells.forEach((cell) => {
+    if (!poolSet.has(cell)) {
+      return;
+    }
+
+    if (ownerByCell.has(cell)) {
+      poolSet.delete(cell);
+      return;
+    }
+
+    const recipientId =
+      [...assignments.entries()]
+        .filter(([zoneId]) => zoneId !== editedZoneId)
+        .sort((left, right) => right[1].size - left[1].size)[0]?.[0] || editedZoneId;
+
+    assignments.get(recipientId)?.add(cell);
+    ownerByCell.set(cell, recipientId);
+    poolSet.delete(cell);
+  });
+}
+
+function buildEditedFeature(zoneLayers) {
+  const features = zoneLayers.map((layer) => layer.toGeoJSON());
+
+  if (features.length === 1) {
+    return features[0];
+  }
+
+  return {
+    type: "Feature",
+    properties: {},
+    geometry: {
+      type: "MultiPolygon",
+      coordinates: features.map((feature) => {
+        if (feature.geometry.type === "Polygon") {
+          return feature.geometry.coordinates;
+        }
+
+        return feature.geometry.coordinates[0];
+      }),
+    },
+  };
+}
+
+function cloneZoneState() {
+  return {
+    workingZones: state.workingZones.map((zone) => ({
+      ...zone,
+      cells: [...zone.cells],
+      parentPincodes: [...(zone.parentPincodes || [])],
+      boundaryFeature: zone.boundaryFeature ? structuredClone(zone.boundaryFeature) : undefined,
+    })),
+    customZones: state.customZones.map((zone) => ({
+      ...zone,
+      cells: [...zone.cells],
+      parentPincodes: [...(zone.parentPincodes || [])],
+      boundaryFeature: zone.boundaryFeature ? structuredClone(zone.boundaryFeature) : undefined,
+    })),
+    hiddenZoneIds: new Set(state.hiddenZoneIds),
+    selectedCell: state.selectedCell,
+  };
+}
+
+function restoreZoneState(snapshot) {
+  state.workingZones = snapshot.workingZones;
+  state.customZones = snapshot.customZones;
+  state.hiddenZoneIds = snapshot.hiddenZoneIds;
+  state.selectedCell = snapshot.selectedCell;
+}
+
 function renderAllZones(shouldFitBounds = false) {
+  drawLayer.clearLayers();
   baseZoneLayer.clearLayers();
   customZoneLayer.clearLayers();
   boundaryZoneLayer.clearLayers();
@@ -584,13 +846,16 @@ function renderBoundaryModeZones(bounds) {
       });
 
       layer.eachLayer((featureLayer) => {
+        featureLayer.zoneId = zone.id;
+        featureLayer.zoneLabel = zone.label;
+        featureLayer.zoneColor = zone.color;
         const layerBounds = featureLayer.getBounds?.();
         if (layerBounds) {
           bounds.push(layerBounds.getNorthWest());
           bounds.push(layerBounds.getSouthEast());
         }
+        drawLayer.addLayer(featureLayer);
       });
-      layer.addTo(boundaryZoneLayer);
     });
 }
 
