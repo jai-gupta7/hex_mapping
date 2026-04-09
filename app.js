@@ -97,6 +97,7 @@ const state = {
   datasetName: "Loading...",
   radiusKm: 5,
   isDrawing: false,
+  isEditing: false,
   customZoneSequence: 0,
 };
 
@@ -166,10 +167,14 @@ function wireEvents() {
 
   map.on(L.Draw.Event.EDITSTART, () => {
     state.isDrawing = true;
+    state.isEditing = true;
+    window.setTimeout(syncEditHandleVisibility, 0);
   });
 
   map.on(L.Draw.Event.EDITSTOP, () => {
     state.isDrawing = false;
+    state.isEditing = false;
+    showAllEditHandles();
   });
 
   map.on(L.Draw.Event.CREATED, (event) => {
@@ -178,6 +183,12 @@ function wireEvents() {
 
   map.on(L.Draw.Event.EDITED, (event) => {
     handleEditedZoneLayers(event.layers);
+  });
+
+  map.on("zoomend", () => {
+    if (state.isEditing) {
+      syncEditHandleVisibility();
+    }
   });
 
 }
@@ -857,6 +868,10 @@ function renderBoundaryModeZones(bounds) {
         drawLayer.addLayer(featureLayer);
       });
     });
+
+  if (state.isEditing) {
+    window.setTimeout(syncEditHandleVisibility, 0);
+  }
 }
 
 function renderHexZones(bounds) {
@@ -989,6 +1004,84 @@ function featureToIntersectingCells(feature, resolution) {
     const hexFeature = cellToGeoJsonFeature(cell);
     return turf.booleanIntersects(hexFeature, feature);
   });
+}
+
+function syncEditHandleVisibility() {
+  const vertexStep = getEditVertexStep();
+  const showMidpoints = map.getZoom() >= 15;
+
+  drawLayer.eachLayer((layer) => {
+    const handlers = layer.editing?._verticesHandlers || [];
+
+    handlers.forEach((handler) => {
+      const markers = handler._markers || [];
+      markers.forEach((marker, index) => {
+        const shouldShowVertex = vertexStep === 1 || index % vertexStep === 0;
+        setEditMarkerVisibility(marker, shouldShowVertex);
+        setEditMarkerVisibility(marker._middleLeft, showMidpoints && shouldShowVertex);
+        setEditMarkerVisibility(marker._middleRight, showMidpoints && shouldShowVertex);
+      });
+    });
+  });
+}
+
+function showAllEditHandles() {
+  drawLayer.eachLayer((layer) => {
+    const handlers = layer.editing?._verticesHandlers || [];
+
+    handlers.forEach((handler) => {
+      const markers = handler._markers || [];
+      markers.forEach((marker) => {
+        setEditMarkerVisibility(marker, true);
+        setEditMarkerVisibility(marker._middleLeft, true);
+        setEditMarkerVisibility(marker._middleRight, true);
+      });
+    });
+  });
+}
+
+function setEditMarkerVisibility(marker, isVisible) {
+  if (!marker) {
+    return;
+  }
+
+  const element = marker.getElement?.() || marker._icon;
+  marker.setOpacity?.(isVisible ? 1 : 0);
+
+  if (element) {
+    element.style.display = isVisible ? "" : "none";
+    element.style.pointerEvents = isVisible ? "auto" : "none";
+  }
+
+  if (marker.dragging) {
+    if (isVisible) {
+      marker.dragging.enable();
+    } else {
+      marker.dragging.disable();
+    }
+  }
+}
+
+function getEditVertexStep() {
+  const zoom = map.getZoom();
+
+  if (zoom >= 16) {
+    return 1;
+  }
+
+  if (zoom >= 15) {
+    return 2;
+  }
+
+  if (zoom >= 14) {
+    return 3;
+  }
+
+  if (zoom >= 13) {
+    return 4;
+  }
+
+  return 6;
 }
 
 function featureToContainedCells(feature, resolution) {
