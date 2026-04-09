@@ -131,7 +131,8 @@ button:disabled {
 }
 
 .stats-card,
-.zone-list {
+.zone-list,
+.legend-card {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -142,7 +143,8 @@ button:disabled {
 }
 
 .stats-card p,
-.zone-list p {
+.zone-list p,
+.legend-card p {
   margin: 0;
   display: flex;
   justify-content: space-between;
@@ -173,6 +175,64 @@ button:disabled {
 
 .zone-chip span:first-child {
   margin-right: auto;
+}
+
+.legend-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.legend-row {
+  align-items: center;
+  justify-content: flex-start;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.legend-row span:last-child {
+  color: var(--text);
+}
+
+.legend-swatch {
+  position: relative;
+  width: 36px;
+  height: 14px;
+  flex: 0 0 36px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.legend-service {
+  border: 3px solid #0f766e;
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.legend-guide {
+  border-top: 2px dashed rgba(211, 226, 255, 0.8);
+  border-bottom: 2px dashed rgba(211, 226, 255, 0.8);
+  border-radius: 0;
+}
+
+.legend-zone {
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  background: rgba(89, 195, 195, 0.45);
+}
+
+.legend-selected {
+  border: 3px solid #ffffff;
+  background: rgba(14, 165, 233, 0.9);
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.3);
+}
+
+.legend-constraint {
+  border: 2px dashed #f59e0b;
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(245, 158, 11, 0.9) 0 4px,
+      rgba(120, 53, 15, 0.75) 4px 8px
+    );
 }
 
 .status-message {
@@ -218,6 +278,14 @@ button:disabled {
 
 .hex-popup strong {
   color: #0f172a;
+}
+
+.leaflet-interactive.selected-cell {
+  filter: drop-shadow(0 0 8px rgba(14, 165, 233, 0.45));
+}
+
+.leaflet-interactive.constraint-cell {
+  filter: drop-shadow(0 0 6px rgba(245, 158, 11, 0.3));
 }
 
 @media (max-width: 920px) {

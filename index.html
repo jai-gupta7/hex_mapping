@@ -22,8 +22,8 @@
         <p class="eyebrow">Uber H3 Zone Planner</p>
         <h1>PIN Code Hex Mapping</h1>
         <p class="subtitle">
-          Select nearby PIN-code boundaries, convert them to H3 cells, then draw valid
-          boundary-sharing custom zones.
+          Build a serviceability area from nearby PIN codes, use those PIN boundaries as
+          guides, then carve the actual planning zones in boundary or H3 mode.
         </p>
 
         <div class="field-grid">
@@ -61,8 +61,8 @@
         <div class="field-group">
           <label for="map-view">Map view</label>
           <select id="map-view">
-            <option value="hex" selected>H3 hex zones</option>
-            <option value="boundary">Original PIN boundaries</option>
+            <option value="hex" selected>Hex mode</option>
+            <option value="boundary">Boundary mode</option>
           </select>
         </div>
 
@@ -74,22 +74,32 @@
 
         <div class="stats-card">
           <p><span class="stat-label">Dataset</span><span id="dataset-name">Loading...</span></p>
+          <p><span class="stat-label">Map view</span><span id="map-view-label">Hex mode</span></p>
           <p><span class="stat-label">Branch radius</span><span id="radius-label">-</span></p>
           <p><span class="stat-label">Selected PIN codes</span><span id="selected-pins">-</span></p>
-          <p><span class="stat-label">Parent H3 cells</span><span id="parent-cell-count">-</span></p>
+          <p><span class="stat-label">Service area cells</span><span id="parent-cell-count">-</span></p>
           <p><span class="stat-label">Custom zones</span><span id="custom-zone-count">0</span></p>
-          <p><span class="stat-label">Clicked cell</span><span id="selected-cell">Click a hex</span></p>
+          <p><span class="stat-label">Constraint cells</span><span id="constraint-cell-count">0</span></p>
+          <p><span class="stat-label">Selected item</span><span id="selected-cell">Click a zone or cell</span></p>
         </div>
 
         <div class="zone-list" id="zone-list" aria-live="polite"></div>
 
+        <div class="legend-card">
+          <p class="legend-title">Map legend</p>
+          <p class="legend-row"><span class="legend-swatch legend-service"></span><span>Serviceability border</span></p>
+          <p class="legend-row"><span class="legend-swatch legend-guide"></span><span>PIN guide boundary</span></p>
+          <p class="legend-row"><span class="legend-swatch legend-zone"></span><span>Planning zone</span></p>
+          <p class="legend-row"><span class="legend-swatch legend-selected"></span><span>Selected cell</span></p>
+          <p class="legend-row"><span class="legend-swatch legend-constraint"></span><span>Constraint cell</span></p>
+        </div>
+
         <p id="status-message" class="status-message" hidden></p>
 
         <p class="hint">
-          Click the map to move the branch point. Use the polygon tool to draw a custom
-          zone. Drawn cells are removed from any existing/default zone they overlap,
-          then saved as a new custom zone. Switch to original PIN boundaries when you
-          want to inspect the raw PIN-code coverage without hex cells.
+          The strong outline is the serviceability area. Dashed PIN boundaries are only
+          guides. Use the polygon tool to create zones; affected zone cells are reassigned
+          automatically, and flagged constraint cells stay visible in both map views.
         </p>
       </aside>
 

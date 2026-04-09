@@ -3,6 +3,11 @@ const PINCODE_GEOJSON_PATH = "./data/pincodes.geojson";
 const SAMPLE_GEOJSON_PATH = "./data/pincodes.sample.geojson";
 const PINCODE_COLORS = ["#59c3c3", "#f4a261", "#90be6d", "#f8961e", "#43aa8b", "#577590"];
 const CUSTOM_COLORS = ["#ef476f", "#9b5de5", "#f15bb5", "#fee440", "#00bbf9", "#00f5d4"];
+const SERVICE_BORDER_COLOR = "#0f766e";
+const GUIDE_BORDER_COLOR = "#d3e2ff";
+const CONSTRAINT_BORDER_COLOR = "#f59e0b";
+const CONSTRAINT_FILL_COLOR = "#f97316";
+const SELECTION_COLOR = "#0ea5e9";
 const PINCODE_PROPERTY_KEYS = [
   "pincode",
   "PINCODE",
@@ -60,10 +65,12 @@ const controls = {
   exportZonesButton: document.getElementById("export-zones-btn"),
   resetButton: document.getElementById("reset-btn"),
   datasetName: document.getElementById("dataset-name"),
+  mapViewLabel: document.getElementById("map-view-label"),
   radiusLabel: document.getElementById("radius-label"),
   selectedPins: document.getElementById("selected-pins"),
   parentCellCount: document.getElementById("parent-cell-count"),
   customZoneCount: document.getElementById("custom-zone-count"),
+  constraintCellCount: document.getElementById("constraint-cell-count"),
   selectedCell: document.getElementById("selected-cell"),
   zoneList: document.getElementById("zone-list"),
   statusMessage: document.getElementById("status-message"),
@@ -77,6 +84,9 @@ const state = {
   workingZones: [],
   parentCells: new Set(),
   selectedPinCodes: [],
+  selectedCell: null,
+  constraintCells: [],
+  serviceAreaFeature: null,
   datasetName: "Loading...",
   radiusKm: 5,
   isDrawing: false,
@@ -86,6 +96,10 @@ const state = {
 const baseZoneLayer = L.layerGroup().addTo(map);
 const customZoneLayer = L.layerGroup().addTo(map);
 const boundaryZoneLayer = L.layerGroup().addTo(map);
+const guideZoneLayer = L.layerGroup().addTo(map);
+const serviceAreaLayer = L.layerGroup().addTo(map);
+const selectionLayer = L.layerGroup().addTo(map);
+const constraintLayer = L.layerGroup().addTo(map);
 const centerLayer = L.layerGroup().addTo(map);
 const radiusLayer = L.layerGroup().addTo(map);
 
@@ -119,6 +133,7 @@ function wireEvents() {
   controls.resetButton.addEventListener("click", async () => {
     state.center = { ...DEFAULT_CENTER };
     state.customZoneSequence = 0;
+    state.selectedCell = null;
     drawLayer.clearLayers();
     syncCenterInputs();
     await rebuildZones();
@@ -144,17 +159,6 @@ function wireEvents() {
     handleDrawnPolygon(event.layer);
   });
 
-  map.on(L.Draw.Event.DELETED, async (event) => {
-    const deletedIds = new Set();
-    event.layers.eachLayer((layer) => {
-      if (layer.zoneId) {
-        deletedIds.add(layer.zoneId);
-      }
-    });
-    state.workingZones = state.workingZones.filter((zone) => !deletedIds.has(zone.id));
-    state.customZones = state.workingZones.filter((zone) => zone.source === "custom");
-    renderAllZones();
-  });
 }
 
 async function loadPincodeData() {
@@ -220,6 +224,7 @@ async function rebuildZones() {
     }
 
     state.selectedPinCodes = selectedFeatures.map((item) => item.id);
+    state.serviceAreaFeature = buildServiceAreaFeature(selectedFeatures.map((item) => item.feature));
     const assignedCells = new Set();
 
     selectedFeatures.forEach((item, index) => {
@@ -243,6 +248,7 @@ async function rebuildZones() {
         state.workingZones.push(zone);
       }
     });
+    state.constraintCells = buildConstraintCells(Array.from(state.parentCells));
 
     renderRadiusCircle();
     renderAllZones(true);
@@ -261,11 +267,18 @@ function clearZoneState() {
   state.workingZones = [];
   state.parentCells = new Set();
   state.selectedPinCodes = [];
+  state.selectedCell = null;
+  state.constraintCells = [];
+  state.serviceAreaFeature = null;
   state.customZoneSequence = 0;
   drawLayer.clearLayers();
   baseZoneLayer.clearLayers();
   customZoneLayer.clearLayers();
   boundaryZoneLayer.clearLayers();
+  guideZoneLayer.clearLayers();
+  serviceAreaLayer.clearLayers();
+  selectionLayer.clearLayers();
+  constraintLayer.clearLayers();
   updateStats();
 }
 
@@ -294,11 +307,6 @@ function selectPincodesInRadius(center, radiusKm, maxCount) {
 }
 
 function handleDrawnPolygon(layer) {
-  if (getMapView() === "boundary") {
-    showStatus("Switch to H3 hex zones view before drawing a custom zone.");
-    return;
-  }
-
   if (!state.parentCells.size) {
     showStatus("Build PIN-code zones before drawing a custom zone.");
     return;
@@ -392,11 +400,20 @@ function renderAllZones(shouldFitBounds = false) {
   baseZoneLayer.clearLayers();
   customZoneLayer.clearLayers();
   boundaryZoneLayer.clearLayers();
+  guideZoneLayer.clearLayers();
+  serviceAreaLayer.clearLayers();
+  selectionLayer.clearLayers();
+  constraintLayer.clearLayers();
 
   const bounds = [];
 
+  renderServiceArea(bounds);
+  renderPincodeGuides(bounds);
+
   if (getMapView() === "boundary") {
-    renderOriginalPincodeBoundaries(bounds);
+    renderZoneBoundaries(bounds);
+    renderConstraintCells(bounds, "boundary");
+    renderSelectedCell(bounds);
     updateStats();
 
     if (shouldFitBounds && bounds.length) {
@@ -406,12 +423,9 @@ function renderAllZones(shouldFitBounds = false) {
     return;
   }
 
-  state.workingZones.forEach((zone) => {
-    const isCustom = zone.source === "custom";
-    const layer = isCustom ? customZoneLayer : baseZoneLayer;
-    const fillOpacity = isCustom ? 0.55 : zone.source === "derived" ? 0.28 : 0.18;
-    renderCells(zone.cells, zone.color, layer, zone.label, fillOpacity, bounds);
-  });
+  renderHexZones(bounds);
+  renderConstraintCells(bounds, "hex");
+  renderSelectedCell(bounds);
 
   updateStats();
 
@@ -420,22 +434,85 @@ function renderAllZones(shouldFitBounds = false) {
   }
 }
 
-function renderOriginalPincodeBoundaries(bounds) {
+function renderServiceArea(bounds) {
+  if (!state.serviceAreaFeature) {
+    return;
+  }
+
+  const layer = L.geoJSON(state.serviceAreaFeature, {
+    interactive: false,
+    style: {
+      color: SERVICE_BORDER_COLOR,
+      weight: 4,
+      fillColor: SERVICE_BORDER_COLOR,
+      fillOpacity: 0.05,
+    },
+  });
+
+  layer.eachLayer((featureLayer) => {
+    const layerBounds = featureLayer.getBounds?.();
+    if (layerBounds) {
+      bounds.push(layerBounds.getNorthWest());
+      bounds.push(layerBounds.getSouthEast());
+    }
+  });
+  layer.addTo(serviceAreaLayer);
+}
+
+function renderPincodeGuides(bounds) {
   state.selectedZones.forEach((zone) => {
     const layer = L.geoJSON(zone.sourceFeature, {
+      bubblingMouseEvents: false,
       style: {
-        color: zone.color,
-        weight: 2,
-        fillColor: zone.color,
-        fillOpacity: 0.16,
+        color: GUIDE_BORDER_COLOR,
+        weight: 1.4,
+        opacity: 0.95,
+        fillOpacity: 0,
+        dashArray: "8 8",
       },
       onEachFeature: (_feature, featureLayer) => {
         featureLayer.bindPopup(buildPincodePopupMarkup(zone));
-        featureLayer.on("click", async (event) => {
+        featureLayer.on("click", () => {
+          state.selectedCell = null;
+          renderSelectedCell();
           controls.selectedCell.textContent = `PIN ${zone.label}`;
-          if (!state.isDrawing) {
-            await updateBranchPoint(event.latlng);
-          }
+        });
+      },
+    });
+
+    layer.eachLayer((featureLayer) => {
+      const layerBounds = featureLayer.getBounds?.();
+      if (layerBounds) {
+        bounds.push(layerBounds.getNorthWest());
+        bounds.push(layerBounds.getSouthEast());
+      }
+    });
+    layer.addTo(guideZoneLayer);
+  });
+}
+
+function renderZoneBoundaries(bounds) {
+  state.workingZones.forEach((zone) => {
+    const feature = zoneCellsToFeature(zone.cells);
+    if (!feature) {
+      return;
+    }
+
+    const isCustom = zone.source === "custom";
+    const layer = L.geoJSON(feature, {
+      bubblingMouseEvents: false,
+      style: {
+        color: zone.color,
+        weight: isCustom ? 3 : zone.source === "derived" ? 2.4 : 2,
+        fillColor: zone.color,
+        fillOpacity: isCustom ? 0.22 : zone.source === "derived" ? 0.15 : 0.09,
+      },
+      onEachFeature: (_feature, featureLayer) => {
+        featureLayer.bindPopup(buildZonePopupMarkup(zone));
+        featureLayer.on("click", () => {
+          state.selectedCell = null;
+          renderSelectedCell();
+          controls.selectedCell.textContent = zone.label;
         });
       },
     });
@@ -448,6 +525,15 @@ function renderOriginalPincodeBoundaries(bounds) {
       }
     });
     layer.addTo(boundaryZoneLayer);
+  });
+}
+
+function renderHexZones(bounds) {
+  state.workingZones.forEach((zone) => {
+    const isCustom = zone.source === "custom";
+    const layer = isCustom ? customZoneLayer : baseZoneLayer;
+    const fillOpacity = isCustom ? 0.5 : zone.source === "derived" ? 0.24 : 0.14;
+    renderCells(zone.cells, zone.color, layer, zone.label, fillOpacity, bounds);
   });
 }
 
@@ -465,14 +551,59 @@ function renderCells(cells, color, layerGroup, label, fillOpacity, bounds) {
     });
 
     polygon.bindPopup(buildPopupMarkup(label, cell));
-    polygon.on("click", async (event) => {
+    polygon.on("click", () => {
+      state.selectedCell = cell;
       controls.selectedCell.textContent = cell;
-      if (!state.isDrawing) {
-        await updateBranchPoint(event.latlng);
-      }
+      renderSelectedCell();
     });
     polygon.addTo(layerGroup);
   });
+}
+
+function renderConstraintCells(bounds, mode) {
+  state.constraintCells.forEach((cell) => {
+    const latLngs = h3.cellToBoundary(cell);
+    latLngs.forEach((point) => bounds?.push(point));
+
+    const polygon = L.polygon(latLngs, {
+      color: CONSTRAINT_BORDER_COLOR,
+      weight: mode === "hex" ? 1.4 : 1.8,
+      fillColor: CONSTRAINT_FILL_COLOR,
+      fillOpacity: mode === "hex" ? 0.22 : 0.12,
+      dashArray: "4 6",
+      className: "constraint-cell",
+      bubblingMouseEvents: false,
+    });
+
+    polygon.bindPopup(buildConstraintPopupMarkup(cell));
+    polygon.on("click", () => {
+      state.selectedCell = cell;
+      controls.selectedCell.textContent = `${cell} (constraint)`;
+      renderSelectedCell();
+    });
+    polygon.addTo(constraintLayer);
+  });
+}
+
+function renderSelectedCell() {
+  selectionLayer.clearLayers();
+
+  if (!state.selectedCell) {
+    return;
+  }
+
+  const latLngs = h3.cellToBoundary(state.selectedCell);
+  const polygon = L.polygon(latLngs, {
+    color: "#ffffff",
+    weight: 3,
+    fillColor: SELECTION_COLOR,
+    fillOpacity: 0.45,
+    className: "selected-cell",
+    bubblingMouseEvents: false,
+  });
+
+  polygon.bindTooltip("Selected cell", { direction: "top" });
+  polygon.addTo(selectionLayer);
 }
 
 function featureToIntersectingCells(feature, resolution) {
@@ -503,6 +634,78 @@ function cellToGeoJsonFeature(cell) {
   const boundary = h3.cellToBoundary(cell, true);
   boundary.push(boundary[0]);
   return turf.polygon([boundary]);
+}
+
+function zoneCellsToFeature(cells) {
+  if (!cells.length) {
+    return null;
+  }
+
+  const multiPolygon = h3.cellsToMultiPolygon(cells, true);
+  if (!multiPolygon.length) {
+    return null;
+  }
+
+  return {
+    type: "Feature",
+    properties: {},
+    geometry: {
+      type: multiPolygon.length === 1 ? "Polygon" : "MultiPolygon",
+      coordinates: multiPolygon.length === 1 ? multiPolygon[0] : multiPolygon,
+    },
+  };
+}
+
+function buildServiceAreaFeature(features) {
+  if (!features.length) {
+    return null;
+  }
+
+  return features.reduce((merged, feature) => {
+    if (!merged) {
+      return turf.clone(feature);
+    }
+
+    try {
+      return turf.union(merged, feature) || merged;
+    } catch (_error) {
+      return merged;
+    }
+  }, null);
+}
+
+function buildConstraintCells(parentCells) {
+  if (!parentCells.length) {
+    return [];
+  }
+
+  const sortedCells = [...parentCells].sort();
+  const targetCount = Math.max(3, Math.min(14, Math.round(sortedCells.length * 0.04)));
+  const flagged = sortedCells.filter((cell) => hashCell(cell) % 17 === 0).slice(0, targetCount);
+
+  if (flagged.length >= targetCount) {
+    return flagged;
+  }
+
+  const fallbackStep = Math.max(1, Math.floor(sortedCells.length / targetCount));
+  for (let index = 0; index < sortedCells.length && flagged.length < targetCount; index += fallbackStep) {
+    const cell = sortedCells[index];
+    if (!flagged.includes(cell)) {
+      flagged.push(cell);
+    }
+  }
+
+  return flagged;
+}
+
+function hashCell(cell) {
+  let hash = 0;
+
+  for (let index = 0; index < cell.length; index += 1) {
+    hash = (hash * 31 + cell.charCodeAt(index)) >>> 0;
+  }
+
+  return hash;
 }
 
 function sharesAllowedBoundary(cells, ownerByCell) {
@@ -598,14 +801,17 @@ function renderRadiusCircle() {
 
 function updateStats() {
   controls.datasetName.textContent = state.datasetName;
+  controls.mapViewLabel.textContent = getMapViewLabel();
   controls.radiusLabel.textContent = state.radiusKm ? `${state.radiusKm} km` : "-";
   controls.selectedPins.textContent = state.selectedPinCodes.length ? state.selectedPinCodes.join(", ") : "-";
   controls.parentCellCount.textContent = state.parentCells.size ? String(state.parentCells.size) : "-";
   controls.customZoneCount.textContent = String(state.customZones.length);
+  controls.constraintCellCount.textContent = String(state.constraintCells.length);
+  controls.selectedCell.textContent = state.selectedCell || "Click a zone or cell";
   controls.zoneList.innerHTML = "";
 
   state.workingZones.forEach((zone) => {
-    appendZoneListItem(`${zone.label} (${zone.source})`, zone.cells.length, zone.color);
+    appendZoneListItem(`${zone.label} (${getZoneSourceLabel(zone.source)})`, zone.cells.length, zone.color);
   });
 }
 
@@ -625,10 +831,12 @@ function exportZoneJson() {
 
   const payload = {
     exportedAt: new Date().toISOString(),
+    mapView: getMapView(),
     resolution: getResolution(),
     center: state.center,
     radiusKm: state.radiusKm,
     selectedPinCodes: state.selectedPinCodes,
+    constraintCells: state.constraintCells,
     zones: state.workingZones.map((zone) => ({
       id: zone.id,
       name: zone.label,
@@ -667,8 +875,28 @@ function buildPincodePopupMarkup(zone) {
   return `
     <div class="hex-popup">
       <strong>PIN ${zone.label}</strong>
-      <span>Original boundary</span>
-      <span>Mapped H3 cells: ${zone.cells.length}</span>
+      <span>Guide boundary only</span>
+      <span>Guide-backed cells: ${zone.cells.length}</span>
+    </div>
+  `;
+}
+
+function buildZonePopupMarkup(zone) {
+  return `
+    <div class="hex-popup">
+      <strong>${zone.label}</strong>
+      <span>${getZoneSourceLabel(zone.source)}</span>
+      <span>Cells: ${zone.cells.length}</span>
+    </div>
+  `;
+}
+
+function buildConstraintPopupMarkup(cell) {
+  return `
+    <div class="hex-popup">
+      <strong>Constraint Cell</strong>
+      <span>${cell}</span>
+      <span>Use with caution while carving zones.</span>
     </div>
   `;
 }
@@ -716,6 +944,10 @@ function getMapView() {
   return controls.mapView.value;
 }
 
+function getMapViewLabel() {
+  return getMapView() === "boundary" ? "Boundary mode" : "Hex mode";
+}
+
 function getPincodeCount() {
   const count = Number(controls.pincodeCount.value);
   if (!Number.isInteger(count) || count < 1) {
@@ -750,6 +982,18 @@ function getPincodeValue(feature) {
 
 function roundCoordinate(value) {
   return Number(value.toFixed(4));
+}
+
+function getZoneSourceLabel(source) {
+  if (source === "custom") {
+    return "Custom zone";
+  }
+
+  if (source === "derived") {
+    return "Derived remainder zone";
+  }
+
+  return "Seed service zone";
 }
 
 function showStatus(message, tone = "error") {
