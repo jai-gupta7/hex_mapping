@@ -4,7 +4,7 @@ const SAMPLE_GEOJSON_PATH = "./data/pincodes.sample.geojson";
 const PINCODE_COLORS = ["#59c3c3", "#f4a261", "#90be6d", "#f8961e", "#43aa8b", "#577590"];
 const CUSTOM_COLORS = ["#ef476f", "#9b5de5", "#f15bb5", "#fee440", "#00bbf9", "#00f5d4"];
 const SERVICE_BORDER_COLOR = "#0f766e";
-const GUIDE_BORDER_COLOR = "#d3e2ff";
+const GUIDE_BORDER_COLOR = "#64748b";
 const CONSTRAINT_BORDER_COLOR = "#f59e0b";
 const CONSTRAINT_FILL_COLOR = "#f97316";
 const SELECTION_COLOR = "#0ea5e9";
@@ -409,9 +409,9 @@ function renderAllZones(shouldFitBounds = false) {
   const bounds = [];
 
   if (getMapView() === "boundary") {
+    renderServiceArea(bounds, "boundary");
     renderBoundaryModeZones(bounds);
     renderPincodeGuides(bounds, "boundary");
-    renderServiceArea(bounds, "boundary");
     renderConstraintCells(bounds, "boundary");
     renderSelectedCell();
     updateStats();
@@ -459,9 +459,6 @@ function renderServiceArea(bounds, mode) {
     }
   });
   layer.addTo(serviceAreaLayer);
-  if (mode === "boundary") {
-    layer.bringToFront();
-  }
 }
 
 function renderPincodeGuides(bounds, mode) {
@@ -470,10 +467,11 @@ function renderPincodeGuides(bounds, mode) {
       bubblingMouseEvents: false,
       style: {
         color: GUIDE_BORDER_COLOR,
-        weight: mode === "boundary" ? 1.8 : 1.4,
-        opacity: mode === "boundary" ? 1 : 0.95,
+        weight: mode === "boundary" ? 2.4 : 1.4,
+        opacity: mode === "boundary" ? 0.92 : 0.95,
         fillOpacity: 0,
-        dashArray: mode === "boundary" ? "7 7" : "8 8",
+        dashArray: mode === "boundary" ? "10 6" : "8 8",
+        lineCap: "square",
       },
       onEachFeature: (_feature, featureLayer) => {
         featureLayer.bindPopup(buildPincodePopupMarkup(zone));
