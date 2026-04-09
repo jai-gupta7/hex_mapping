@@ -371,9 +371,9 @@ function handleDrawnPolygon(layer) {
   try {
     const resolution = getResolution();
     const feature = layer.toGeoJSON();
-    const selectedCells = featureToIntersectingCells(feature, resolution);
+    const selectedCells = featureToContainedCells(feature, resolution);
     const parentSelectedCells = selectedCells.filter((cell) => state.parentCells.has(cell));
-    const outsideCells = selectedCells.filter((cell) => !state.parentCells.has(cell));
+    const outsideCells = featureToIntersectingCells(feature, resolution).filter((cell) => !state.parentCells.has(cell));
     const selectedCellSet = new Set(parentSelectedCells);
     const ownerByCell = getCellOwnerMap();
 
@@ -723,6 +723,15 @@ function featureToIntersectingCells(feature, resolution) {
   return candidates.filter((cell) => {
     const hexFeature = cellToGeoJsonFeature(cell);
     return turf.booleanIntersects(hexFeature, feature);
+  });
+}
+
+function featureToContainedCells(feature, resolution) {
+  const candidates = candidateCellsFromBbox(feature, resolution);
+
+  return candidates.filter((cell) => {
+    const [lat, lng] = h3.cellToLatLng(cell);
+    return turf.booleanPointInPolygon(turf.point([lng, lat]), feature);
   });
 }
 
