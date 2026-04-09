@@ -77,6 +77,14 @@ body {
   gap: 8px;
 }
 
+.action-field {
+  justify-content: flex-end;
+}
+
+.action-field button {
+  margin-top: auto;
+}
+
 .field-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -164,6 +172,10 @@ button:disabled {
   font-size: 0.9rem;
 }
 
+.zone-chip.is-hidden {
+  opacity: 0.5;
+}
+
 .zone-chip::before {
   content: "";
   width: 10px;
@@ -175,6 +187,18 @@ button:disabled {
 
 .zone-chip span:first-child {
   margin-right: auto;
+}
+
+.zone-chip-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.zone-chip-toggle input {
+  margin: 0;
 }
 
 .legend-title {

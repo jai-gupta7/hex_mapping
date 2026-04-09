@@ -61,7 +61,9 @@ const controls = {
   serviceRadius: document.getElementById("service-radius"),
   latInput: document.getElementById("lat-input"),
   lngInput: document.getElementById("lng-input"),
+  zoneCount: document.getElementById("zone-count"),
   buildZonesButton: document.getElementById("build-zones-btn"),
+  generateZonesButton: document.getElementById("generate-zones-btn"),
   exportZonesButton: document.getElementById("export-zones-btn"),
   resetButton: document.getElementById("reset-btn"),
   datasetName: document.getElementById("dataset-name"),
@@ -87,6 +89,7 @@ const state = {
   selectedCell: null,
   constraintCells: [],
   serviceAreaFeature: null,
+  hiddenZoneIds: new Set(),
   datasetName: "Loading...",
   radiusKm: 5,
   isDrawing: false,
@@ -128,12 +131,14 @@ function wireEvents() {
   controls.latInput.addEventListener("change", rebuildZones);
   controls.lngInput.addEventListener("change", rebuildZones);
   controls.mapView.addEventListener("change", () => renderAllZones(true));
+  controls.generateZonesButton.addEventListener("click", generateRandomZones);
   controls.exportZonesButton.addEventListener("click", exportZoneJson);
 
   controls.resetButton.addEventListener("click", async () => {
     state.center = { ...DEFAULT_CENTER };
     state.customZoneSequence = 0;
     state.selectedCell = null;
+    state.hiddenZoneIds = new Set();
     drawLayer.clearLayers();
     syncCenterInputs();
     await rebuildZones();
@@ -270,6 +275,7 @@ function clearZoneState() {
   state.selectedCell = null;
   state.constraintCells = [];
   state.serviceAreaFeature = null;
+  state.hiddenZoneIds = new Set();
   state.customZoneSequence = 0;
   drawLayer.clearLayers();
   baseZoneLayer.clearLayers();
@@ -280,6 +286,56 @@ function clearZoneState() {
   selectionLayer.clearLayers();
   constraintLayer.clearLayers();
   updateStats();
+}
+
+function generateRandomZones() {
+  if (!state.parentCells.size) {
+    showStatus("Build the serviceability area before generating random zones.");
+    return;
+  }
+
+  const requestedZoneCount = getZoneCount();
+  const allCells = Array.from(state.parentCells);
+  const serviceComponents = getConnectedCellComponents(allCells);
+  const minimumZoneCount = serviceComponents.length;
+  const effectiveZoneCount = Math.max(
+    minimumZoneCount,
+    Math.min(requestedZoneCount, allCells.length)
+  );
+  const zoneAllocations = allocateZonesAcrossComponents(serviceComponents, effectiveZoneCount);
+  const nextZones = [];
+
+  zoneAllocations.forEach((zoneCount, componentIndex) => {
+    const componentCells = serviceComponents[componentIndex];
+    const partitions = partitionComponentIntoZones(componentCells, zoneCount);
+
+    partitions.forEach((cells, partitionIndex) => {
+      nextZones.push({
+        id: `custom-auto-${componentIndex + 1}-${partitionIndex + 1}-${Date.now()}`,
+        label: `Zone ${nextZones.length + 1}`,
+        color: CUSTOM_COLORS[nextZones.length % CUSTOM_COLORS.length],
+        source: "custom",
+        parentPincodes: state.selectedPinCodes,
+        cells,
+      });
+    });
+  });
+
+  state.workingZones = nextZones;
+  state.customZones = [...nextZones];
+  state.hiddenZoneIds = new Set();
+  state.selectedCell = null;
+  renderAllZones();
+
+  if (effectiveZoneCount !== requestedZoneCount) {
+    showStatus(
+      `Generated ${effectiveZoneCount} zones. The serviceability area has ${minimumZoneCount} disconnected section(s), so the requested count was adjusted.`,
+      "success"
+    );
+    return;
+  }
+
+  showStatus(`Generated ${effectiveZoneCount} random zones across the full serviceability area.`, "success");
 }
 
 function selectPincodesInRadius(center, radiusKm, maxCount) {
@@ -387,6 +443,9 @@ function handleDrawnPolygon(layer) {
 
     state.workingZones = nextZones;
     state.customZones = state.workingZones.filter((zone) => zone.source === "custom");
+    state.hiddenZoneIds = new Set(
+      [...state.hiddenZoneIds].filter((zoneId) => state.workingZones.some((zone) => zone.id === zoneId))
+    );
     renderAllZones();
     showStatus(
       `Created ${parentSelectedCells.length} H3-cell custom zone and rebuilt ${affectedZoneIds.size} affected zone(s).`,
@@ -499,9 +558,14 @@ function renderPincodeGuides(bounds, mode) {
 
 function renderBoundaryModeZones(bounds) {
   state.workingZones
-    .filter((zone) => zone.source === "custom" && zone.boundaryFeature)
+    .filter((zone) => !state.hiddenZoneIds.has(zone.id))
     .forEach((zone) => {
-      const layer = L.geoJSON(zone.boundaryFeature, {
+      const feature = zone.boundaryFeature || zoneCellsToFeature(zone.cells);
+      if (!feature) {
+        return;
+      }
+
+      const layer = L.geoJSON(feature, {
         bubblingMouseEvents: false,
         style: {
           color: zone.color,
@@ -532,6 +596,10 @@ function renderBoundaryModeZones(bounds) {
 
 function renderHexZones(bounds) {
   state.workingZones.forEach((zone) => {
+    if (state.hiddenZoneIds.has(zone.id)) {
+      return;
+    }
+
     const isCustom = zone.source === "custom";
     const layer = isCustom ? customZoneLayer : baseZoneLayer;
     const fillOpacity = isCustom ? 0.5 : zone.source === "derived" ? 0.24 : 0.14;
@@ -679,6 +747,26 @@ function cellToGeoJsonFeature(cell) {
   return turf.polygon([boundary]);
 }
 
+function zoneCellsToFeature(cells) {
+  if (!cells.length) {
+    return null;
+  }
+
+  const multiPolygon = h3.cellsToMultiPolygon(cells, true);
+  if (!multiPolygon.length) {
+    return null;
+  }
+
+  return {
+    type: "Feature",
+    properties: {},
+    geometry: {
+      type: multiPolygon.length === 1 ? "Polygon" : "MultiPolygon",
+      coordinates: multiPolygon.length === 1 ? multiPolygon[0] : multiPolygon,
+    },
+  };
+}
+
 function buildServiceAreaFeature(features) {
   if (!features.length) {
     return null;
@@ -729,6 +817,144 @@ function hashCell(cell) {
   }
 
   return hash;
+}
+
+function allocateZonesAcrossComponents(components, totalZoneCount) {
+  const allocations = components.map(() => 1);
+  let remaining = totalZoneCount - components.length;
+
+  while (remaining > 0) {
+    let bestIndex = 0;
+    let bestScore = -Infinity;
+
+    components.forEach((component, index) => {
+      const score = component.length / allocations[index];
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+    });
+
+    allocations[bestIndex] += 1;
+    remaining -= 1;
+  }
+
+  return allocations;
+}
+
+function partitionComponentIntoZones(cells, zoneCount) {
+  if (zoneCount <= 1 || cells.length <= 1) {
+    return [cells];
+  }
+
+  const seeds = pickSpreadSeeds(cells, zoneCount);
+  const cellSet = new Set(cells);
+  const unassigned = new Set(cells);
+  const zoneCells = seeds.map((seed) => [seed]);
+  const frontiers = seeds.map((seed) => new Set([seed]));
+  const ownerByCell = new Map();
+
+  seeds.forEach((seed, zoneIndex) => {
+    unassigned.delete(seed);
+    ownerByCell.set(seed, zoneIndex);
+  });
+
+  while (unassigned.size) {
+    let progressed = false;
+
+    shuffledArray(zoneCells.map((_zone, index) => index)).forEach((zoneIndex) => {
+      const candidates = [];
+
+      frontiers[zoneIndex].forEach((frontierCell) => {
+        getAdjacentCells(frontierCell, cellSet).forEach((neighbor) => {
+          if (unassigned.has(neighbor)) {
+            candidates.push(neighbor);
+          }
+        });
+      });
+
+      if (!candidates.length) {
+        return;
+      }
+
+      const nextCell = candidates[Math.floor(Math.random() * candidates.length)];
+      unassigned.delete(nextCell);
+      ownerByCell.set(nextCell, zoneIndex);
+      zoneCells[zoneIndex].push(nextCell);
+      frontiers[zoneIndex].add(nextCell);
+      progressed = true;
+    });
+
+    if (progressed) {
+      continue;
+    }
+
+    const orphan = unassigned.values().next().value;
+    const neighborOwners = getAdjacentCells(orphan, cellSet)
+      .map((neighbor) => ownerByCell.get(neighbor))
+      .filter((owner) => owner !== undefined);
+    const fallbackZone = neighborOwners.length
+      ? neighborOwners[Math.floor(Math.random() * neighborOwners.length)]
+      : Math.floor(Math.random() * zoneCount);
+
+    unassigned.delete(orphan);
+    ownerByCell.set(orphan, fallbackZone);
+    zoneCells[fallbackZone].push(orphan);
+    frontiers[fallbackZone].add(orphan);
+  }
+
+  return zoneCells;
+}
+
+function pickSpreadSeeds(cells, zoneCount) {
+  const pool = shuffledArray([...cells]);
+  const seeds = [pool[0]];
+
+  while (seeds.length < zoneCount && seeds.length < pool.length) {
+    let bestCell = null;
+    let bestScore = -Infinity;
+
+    pool.forEach((cell) => {
+      if (seeds.includes(cell)) {
+        return;
+      }
+
+      const score = Math.min(...seeds.map((seed) => getCellDistanceKm(cell, seed)));
+      if (score > bestScore) {
+        bestScore = score;
+        bestCell = cell;
+      }
+    });
+
+    if (!bestCell) {
+      break;
+    }
+
+    seeds.push(bestCell);
+  }
+
+  return seeds;
+}
+
+function getCellDistanceKm(cellA, cellB) {
+  const [latA, lngA] = h3.cellToLatLng(cellA);
+  const [latB, lngB] = h3.cellToLatLng(cellB);
+  return turf.distance(turf.point([lngA, latA]), turf.point([lngB, latB]), { units: "kilometers" });
+}
+
+function getAdjacentCells(cell, cellSet) {
+  return h3.gridDisk(cell, 1).filter((neighbor) => neighbor !== cell && cellSet.has(neighbor));
+}
+
+function shuffledArray(values) {
+  const items = [...values];
+
+  for (let index = items.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [items[index], items[swapIndex]] = [items[swapIndex], items[index]];
+  }
+
+  return items;
 }
 
 function sharesAllowedBoundary(cells, ownerByCell) {
@@ -823,15 +1049,41 @@ function updateStats() {
   controls.zoneList.innerHTML = "";
 
   state.workingZones.forEach((zone) => {
-    appendZoneListItem(`${zone.label} (${getZoneSourceLabel(zone.source)})`, zone.cells.length, zone.color);
+    appendZoneListItem(zone);
   });
 }
 
-function appendZoneListItem(label, cellCount, color) {
+function appendZoneListItem(zone) {
   const row = document.createElement("p");
   row.className = "zone-chip";
-  row.style.setProperty("--zone-color", color);
-  row.innerHTML = `<span>${label}</span><span>${cellCount} cells</span>`;
+  const isHidden = state.hiddenZoneIds.has(zone.id);
+  row.style.setProperty("--zone-color", zone.color);
+  row.classList.toggle("is-hidden", isHidden);
+
+  const label = document.createElement("span");
+  label.textContent = `${zone.label} (${getZoneSourceLabel(zone.source)})`;
+
+  const cells = document.createElement("span");
+  cells.textContent = `${zone.cells.length} cells`;
+
+  const toggleWrap = document.createElement("label");
+  toggleWrap.className = "zone-chip-toggle";
+
+  const toggle = document.createElement("input");
+  toggle.type = "checkbox";
+  toggle.checked = !isHidden;
+  toggle.addEventListener("change", () => {
+    setZoneVisibility(zone.id, toggle.checked);
+  });
+
+  const toggleText = document.createElement("span");
+  toggleText.textContent = toggle.checked ? "Visible" : "Hidden";
+  toggle.addEventListener("change", () => {
+    toggleText.textContent = toggle.checked ? "Visible" : "Hidden";
+  });
+
+  toggleWrap.append(toggle, toggleText);
+  row.append(label, cells, toggleWrap);
   controls.zoneList.appendChild(row);
 }
 
@@ -960,6 +1212,15 @@ function getMapViewLabel() {
   return getMapView() === "boundary" ? "Boundary mode" : "Hex mode";
 }
 
+function getZoneCount() {
+  const zoneCount = Number(controls.zoneCount.value);
+  if (!Number.isInteger(zoneCount) || zoneCount < 1) {
+    return 1;
+  }
+
+  return Math.min(zoneCount, Math.max(1, state.parentCells.size || zoneCount));
+}
+
 function getPincodeCount() {
   const count = Number(controls.pincodeCount.value);
   if (!Number.isInteger(count) || count < 1) {
@@ -994,6 +1255,16 @@ function getPincodeValue(feature) {
 
 function roundCoordinate(value) {
   return Number(value.toFixed(4));
+}
+
+function setZoneVisibility(zoneId, isVisible) {
+  if (isVisible) {
+    state.hiddenZoneIds.delete(zoneId);
+  } else {
+    state.hiddenZoneIds.add(zoneId);
+  }
+
+  renderAllZones();
 }
 
 function getZoneSourceLabel(source) {

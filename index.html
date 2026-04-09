@@ -66,6 +66,18 @@
           </select>
         </div>
 
+        <div class="field-grid">
+          <div class="field-group">
+            <label for="zone-count">Random zone count</label>
+            <input id="zone-count" type="number" min="1" max="50" step="1" value="4" />
+          </div>
+
+          <div class="field-group action-field">
+            <label>&nbsp;</label>
+            <button id="generate-zones-btn" type="button" class="ghost-button">Generate Zones</button>
+          </div>
+        </div>
+
         <div class="action-row">
           <button id="build-zones-btn" type="button">Build PIN Zones</button>
           <button id="export-zones-btn" type="button" class="ghost-button">Export JSON</button>
@@ -98,8 +110,9 @@
 
         <p class="hint">
           The strong outline is the serviceability area. Dashed PIN boundaries are only
-          guides. Use the polygon tool to create zones; affected zone cells are reassigned
-          automatically, and flagged constraint cells stay visible in both map views.
+          guides. Use the polygon tool or random zone generator to create zones; affected
+          zone cells are reassigned automatically, and flagged constraint cells stay visible
+          in both map views.
         </p>
       </aside>
 
