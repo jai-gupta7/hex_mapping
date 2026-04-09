@@ -809,17 +809,6 @@ function drawCenterMarker() {
 
 function renderRadiusCircle() {
   radiusLayer.clearLayers();
-  L.circle([state.center.lat, state.center.lng], {
-    radius: state.radiusKm * 1000,
-    color: "#ef476f",
-    weight: 2,
-    opacity: 0.75,
-    fillColor: "#ef476f",
-    fillOpacity: 0.05,
-    dashArray: "8 8",
-  })
-    .bindTooltip(`${state.radiusKm} km branch radius`, { direction: "top" })
-    .addTo(radiusLayer);
 }
 
 function updateStats() {
