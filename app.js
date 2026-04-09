@@ -66,6 +66,7 @@ const controls = {
   latInput: document.getElementById("lat-input"),
   lngInput: document.getElementById("lng-input"),
   zoneCount: document.getElementById("zone-count"),
+  showConstraints: document.getElementById("show-constraints"),
   buildZonesButton: document.getElementById("build-zones-btn"),
   generateZonesButton: document.getElementById("generate-zones-btn"),
   exportZonesButton: document.getElementById("export-zones-btn"),
@@ -94,6 +95,7 @@ const state = {
   constraintCells: [],
   serviceAreaFeature: null,
   hiddenZoneIds: new Set(),
+  constraintsVisible: true,
   datasetName: "Loading...",
   radiusKm: 5,
   isDrawing: false,
@@ -136,6 +138,10 @@ function wireEvents() {
   controls.latInput.addEventListener("change", rebuildZones);
   controls.lngInput.addEventListener("change", rebuildZones);
   controls.mapView.addEventListener("change", () => renderAllZones(true));
+  controls.showConstraints.addEventListener("change", () => {
+    state.constraintsVisible = controls.showConstraints.checked;
+    renderAllZones();
+  });
   controls.generateZonesButton.addEventListener("click", generateRandomZones);
   controls.exportZonesButton.addEventListener("click", exportZoneJson);
 
@@ -144,6 +150,8 @@ function wireEvents() {
     state.customZoneSequence = 0;
     state.selectedCell = null;
     state.hiddenZoneIds = new Set();
+    state.constraintsVisible = true;
+    controls.showConstraints.checked = true;
     drawLayer.clearLayers();
     syncCenterInputs();
     await rebuildZones();
@@ -911,6 +919,10 @@ function renderCells(cells, color, layerGroup, label, fillOpacity, bounds) {
 }
 
 function renderConstraintCells(bounds, mode) {
+  if (!state.constraintsVisible) {
+    return;
+  }
+
   state.constraintCells.forEach((cell) => {
     if (mode === "boundary") {
       const [lat, lng] = h3.cellToLatLng(cell);
