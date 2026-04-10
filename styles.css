@@ -330,6 +330,24 @@ button:disabled {
   filter: drop-shadow(0 0 6px rgba(245, 158, 11, 0.3));
 }
 
+.leaflet-div-icon.leaflet-editing-icon {
+  width: 10px !important;
+  height: 10px !important;
+  margin-left: -5px !important;
+  margin-top: -5px !important;
+  border-radius: 999px;
+  border: 2px solid #ffffff;
+  background: #0ea5e9;
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.18);
+}
+
+.leaflet-touch .leaflet-div-icon.leaflet-editing-icon {
+  width: 12px !important;
+  height: 12px !important;
+  margin-left: -6px !important;
+  margin-top: -6px !important;
+}
+
 @media (max-width: 920px) {
   .app-shell {
     grid-template-columns: 1fr;
