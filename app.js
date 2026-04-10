@@ -993,22 +993,60 @@ function renderConstraintPattern(latLngs) {
 
   const latSpan = bounds.maxLat - bounds.minLat;
   const lngSpan = bounds.maxLng - bounds.minLng;
-  const stripeCount = 5;
-  const stripeStep = (latSpan + lngSpan) / stripeCount;
+  const padding = Math.max(latSpan, lngSpan) * 0.35;
+  const stripeSpacing = (latSpan + lngSpan) / 6;
+  const ring = [...latLngs.map((point) => [point.lng, point.lat]), [latLngs[0].lng, latLngs[0].lat]];
+  const polygon = turf.polygon([ring]);
+  const boundary = turf.lineString(ring);
 
-  for (let index = -1; index <= stripeCount + 1; index += 1) {
-    const offset = stripeStep * index;
-    const start = L.latLng(bounds.minLat + offset, bounds.minLng);
-    const end = L.latLng(bounds.minLat + offset - latSpan, bounds.maxLng);
+  for (
+    let offset = bounds.minLng - (latSpan + padding * 2);
+    offset <= bounds.maxLng + lngSpan + padding * 2;
+    offset += stripeSpacing
+  ) {
+    const line = turf.lineString([
+      [offset, bounds.maxLat + padding],
+      [offset + latSpan + padding * 2, bounds.minLat - padding],
+    ]);
+    const intersections = turf.lineIntersect(line, boundary).features
+      .map((feature) => feature.geometry.coordinates)
+      .reduce((unique, point) => {
+        const key = `${point[0].toFixed(6)}:${point[1].toFixed(6)}`;
+        if (!unique.some((entry) => entry.key === key)) {
+          unique.push({ key, point });
+        }
+        return unique;
+      }, [])
+      .map((entry) => entry.point)
+      .sort((left, right) => left[0] - right[0] || right[1] - left[1]);
 
-    L.polyline([start, end], {
-      color: "rgba(120, 53, 15, 0.95)",
-      weight: 1,
-      opacity: 0.9,
-      interactive: false,
-      bubblingMouseEvents: false,
-      dashArray: "1 0",
-    }).addTo(constraintLayer);
+    if (intersections.length < 2) {
+      continue;
+    }
+
+    const [startLng, startLat] = intersections[0];
+    const [endLng, endLat] = intersections[intersections.length - 1];
+
+    if (
+      !turf.booleanPointInPolygon(turf.point([startLng + 0.000001, startLat - 0.000001]), polygon) &&
+      !turf.booleanPointInPolygon(turf.point([endLng - 0.000001, endLat + 0.000001]), polygon)
+    ) {
+      continue;
+    }
+
+    L.polyline(
+      [
+        L.latLng(startLat, startLng),
+        L.latLng(endLat, endLng),
+      ],
+      {
+        color: "#78350f",
+        weight: 1.15,
+        opacity: 0.95,
+        interactive: false,
+        bubblingMouseEvents: false,
+      }
+    ).addTo(constraintLayer);
   }
 }
 
