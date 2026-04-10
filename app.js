@@ -30,6 +30,7 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
 }).addTo(map);
 
 const drawLayer = new L.FeatureGroup().addTo(map);
+const pointClusterLayer = createPointClusterLayer().addTo(map);
 map.addControl(
   new L.Control.Draw({
     edit: {
@@ -64,9 +65,11 @@ const controls = {
   latInput: document.getElementById("lat-input"),
   lngInput: document.getElementById("lng-input"),
   zoneCount: document.getElementById("zone-count"),
+  pointCount: document.getElementById("point-count"),
   showConstraints: document.getElementById("show-constraints"),
   buildZonesButton: document.getElementById("build-zones-btn"),
   generateZonesButton: document.getElementById("generate-zones-btn"),
+  generatePointsButton: document.getElementById("generate-points-btn"),
   exportZonesButton: document.getElementById("export-zones-btn"),
   resetButton: document.getElementById("reset-btn"),
   datasetName: document.getElementById("dataset-name"),
@@ -75,6 +78,7 @@ const controls = {
   selectedPins: document.getElementById("selected-pins"),
   parentCellCount: document.getElementById("parent-cell-count"),
   customZoneCount: document.getElementById("custom-zone-count"),
+  mappedPointCount: document.getElementById("mapped-point-count"),
   constraintCellCount: document.getElementById("constraint-cell-count"),
   selectedCell: document.getElementById("selected-cell"),
   zoneList: document.getElementById("zone-list"),
@@ -90,6 +94,7 @@ const state = {
   parentCells: new Set(),
   selectedPinCodes: [],
   selectedCell: null,
+  servicePoints: [],
   constraintCells: [],
   serviceAreaFeature: null,
   hiddenZoneIds: new Set(),
@@ -113,14 +118,44 @@ const radiusLayer = L.layerGroup().addTo(map);
 
 bootstrap();
 
+function createPointClusterLayer() {
+  if (typeof L.markerClusterGroup !== "function") {
+    return L.layerGroup();
+  }
+
+  return L.markerClusterGroup({
+    showCoverageOnHover: false,
+    spiderfyOnMaxZoom: true,
+    removeOutsideVisibleBounds: true,
+    maxClusterRadius: 42,
+    iconCreateFunction(cluster) {
+      const count = cluster.getChildCount();
+      const sizeClass =
+        count >= 100
+          ? "service-point-cluster service-point-cluster--large"
+          : count >= 30
+            ? "service-point-cluster service-point-cluster--medium"
+            : "service-point-cluster";
+      const diameter = count >= 100 ? 74 : count >= 30 ? 62 : 50;
+
+      return L.divIcon({
+        html: `<div><span>${count}</span></div>`,
+        className: `marker-cluster ${sizeClass}`,
+        iconSize: L.point(diameter, diameter),
+      });
+    },
+  });
+}
+
 async function bootstrap() {
   syncCenterInputs();
   wireEvents();
   drawCenterMarker();
 
-  if (!window.h3 || !window.turf || !L.Control.Draw) {
+  if (!window.h3 || !window.turf || !L.Control.Draw || !L.markerClusterGroup) {
     showStatus("Required map libraries failed to load. Refresh the page and check your network access.");
     controls.buildZonesButton.disabled = true;
+    controls.generatePointsButton.disabled = true;
     return;
   }
 
@@ -141,6 +176,7 @@ function wireEvents() {
     renderAllZones();
   });
   controls.generateZonesButton.addEventListener("click", generateRandomZones);
+  controls.generatePointsButton.addEventListener("click", generateServicePoints);
   controls.exportZonesButton.addEventListener("click", exportZoneJson);
 
   controls.resetButton.addEventListener("click", async () => {
@@ -306,11 +342,13 @@ function clearZoneState() {
   state.parentCells = new Set();
   state.selectedPinCodes = [];
   state.selectedCell = null;
+  state.servicePoints = [];
   state.constraintCells = [];
   state.serviceAreaFeature = null;
   state.hiddenZoneIds = new Set();
   state.customZoneSequence = 0;
   drawLayer.clearLayers();
+  pointClusterLayer.clearLayers();
   baseZoneLayer.clearLayers();
   customZoneLayer.clearLayers();
   boundaryZoneLayer.clearLayers();
@@ -369,6 +407,31 @@ function generateRandomZones() {
   }
 
   showStatus(`Generated ${effectiveZoneCount} random zones across the full serviceability area.`, "success");
+}
+
+function generateServicePoints() {
+  if (!state.parentCells.size) {
+    showStatus("Build the serviceability area before mapping points.");
+    return;
+  }
+
+  const pointCount = getPointCount();
+  const parentCells = Array.from(state.parentCells);
+  state.servicePoints = Array.from({ length: pointCount }, (_entry, index) => {
+    const cell = parentCells[Math.floor(Math.random() * parentCells.length)];
+    const point = randomPointInCell(cell);
+
+    return {
+      id: `service-point-${Date.now()}-${index + 1}`,
+      lat: point.lat,
+      lng: point.lng,
+      cell,
+    };
+  });
+
+  renderServicePoints();
+  updateStats();
+  showStatus(`Mapped ${pointCount} service points across the current serviceability area.`, "success");
 }
 
 function selectPincodesInRadius(center, radiusKm, maxCount) {
@@ -752,6 +815,7 @@ function renderAllZones(shouldFitBounds = false) {
     renderPincodeGuides(bounds, "boundary");
     renderConstraintCells(bounds, "boundary");
     renderSelectedCell();
+    renderServicePoints();
     updateStats();
 
     if (shouldFitBounds && bounds.length) {
@@ -766,6 +830,7 @@ function renderAllZones(shouldFitBounds = false) {
   renderHexZones(bounds);
   renderConstraintCells(bounds, "hex");
   renderSelectedCell();
+  renderServicePoints();
 
   updateStats();
 
@@ -969,6 +1034,31 @@ function renderConstraintCells(bounds, mode) {
     });
     polygon.addTo(constraintLayer);
     renderConstraintPattern(latLngs, zoneColor);
+  });
+}
+
+function renderServicePoints() {
+  pointClusterLayer.clearLayers();
+
+  state.servicePoints.forEach((point, index) => {
+    const marker = L.marker([point.lat, point.lng], {
+      bubblingMouseEvents: false,
+      icon: L.divIcon({
+        className: "service-point-icon",
+        html: '<span class="service-point-icon__inner"></span>',
+        iconSize: [12, 12],
+        iconAnchor: [6, 6],
+        popupAnchor: [0, -8],
+      }),
+    });
+
+    marker.bindPopup(buildServicePointPopupMarkup(point, index + 1));
+    marker.on("click", () => {
+      state.selectedCell = null;
+      controls.selectedCell.textContent = `Service point ${index + 1}`;
+      renderSelectedCell();
+    });
+    pointClusterLayer.addLayer(marker);
   });
 }
 
@@ -1445,10 +1535,13 @@ function getCellOwnerMap() {
 }
 
 function getZoneColorForCell(cell) {
+  return getZoneForCell(cell)?.color || GUIDE_BORDER_COLOR;
+}
+
+function getZoneForCell(cell) {
   const ownerByCell = getCellOwnerMap();
   const ownerId = ownerByCell.get(cell);
-  const zone = state.workingZones.find((item) => item.id === ownerId);
-  return zone?.color || GUIDE_BORDER_COLOR;
+  return state.workingZones.find((item) => item.id === ownerId) || null;
 }
 
 function getConnectedCellComponents(cells) {
@@ -1512,6 +1605,7 @@ function updateStats() {
   controls.selectedPins.textContent = state.selectedPinCodes.length ? state.selectedPinCodes.join(", ") : "-";
   controls.parentCellCount.textContent = state.parentCells.size ? String(state.parentCells.size) : "-";
   controls.customZoneCount.textContent = String(state.customZones.length);
+  controls.mappedPointCount.textContent = String(state.servicePoints.length);
   controls.constraintCellCount.textContent = String(state.constraintCells.length);
   controls.selectedCell.textContent = state.selectedCell || "Click a zone or cell";
   controls.zoneList.innerHTML = "";
@@ -1568,6 +1662,7 @@ function exportZoneJson() {
     center: state.center,
     radiusKm: state.radiusKm,
     selectedPinCodes: state.selectedPinCodes,
+    servicePoints: state.servicePoints,
     constraintCells: state.constraintCells,
     zones: state.workingZones.map((zone) => ({
       id: zone.id,
@@ -1633,6 +1728,18 @@ function buildConstraintPopupMarkup(cell) {
   `;
 }
 
+function buildServicePointPopupMarkup(point, index) {
+  const zone = getZoneForCell(point.cell);
+  return `
+    <div class="hex-popup">
+      <strong>Service Point ${index}</strong>
+      <span>${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}</span>
+      <span>Zone: ${zone?.label || "Unassigned"}</span>
+      <span>Cell: ${point.cell}</span>
+    </div>
+  `;
+}
+
 function readCenterInputs() {
   const lat = Number(controls.latInput.value);
   const lng = Number(controls.lngInput.value);
@@ -1689,6 +1796,15 @@ function getZoneCount() {
   return Math.min(zoneCount, Math.max(1, state.parentCells.size || zoneCount));
 }
 
+function getPointCount() {
+  const pointCount = Number(controls.pointCount.value);
+  if (!Number.isInteger(pointCount) || pointCount < 1) {
+    return 1;
+  }
+
+  return Math.min(pointCount, 5000);
+}
+
 function getPincodeCount() {
   const count = Number(controls.pincodeCount.value);
   if (!Number.isInteger(count) || count < 1) {
@@ -1723,6 +1839,22 @@ function getPincodeValue(feature) {
 
 function roundCoordinate(value) {
   return Number(value.toFixed(4));
+}
+
+function randomPointInCell(cell) {
+  const cellFeature = cellToGeoJsonFeature(cell);
+  const [minLng, minLat, maxLng, maxLat] = turf.bbox(cellFeature);
+
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    const lng = minLng + Math.random() * (maxLng - minLng);
+    const lat = minLat + Math.random() * (maxLat - minLat);
+    if (turf.booleanPointInPolygon(turf.point([lng, lat]), cellFeature)) {
+      return { lat, lng };
+    }
+  }
+
+  const [lat, lng] = h3.cellToLatLng(cell);
+  return { lat, lng };
 }
 
 function setZoneVisibility(zoneId, isVisible) {

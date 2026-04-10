@@ -350,6 +350,76 @@ button:disabled {
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8);
 }
 
+.service-point-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.service-point-icon__inner {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.96);
+  background: linear-gradient(135deg, #0ea5e9, #2563eb);
+  box-shadow:
+    0 0 0 2px rgba(14, 165, 233, 0.2),
+    0 6px 16px rgba(37, 99, 235, 0.24);
+}
+
+.marker-cluster,
+.marker-cluster div {
+  background: transparent;
+}
+
+.marker-cluster span {
+  color: #eff5ff;
+  font-weight: 800;
+}
+
+.service-point-cluster {
+  background: rgba(14, 165, 233, 0.14);
+  border-radius: 999px;
+  box-shadow: 0 12px 22px rgba(14, 165, 233, 0.2);
+}
+
+.service-point-cluster div {
+  width: 40px;
+  height: 40px;
+  margin-left: 5px;
+  margin-top: 5px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.96);
+  background: linear-gradient(135deg, #0284c7, #2563eb);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.service-point-cluster.service-point-cluster--medium {
+  background: rgba(37, 99, 235, 0.18);
+}
+
+.service-point-cluster.service-point-cluster--medium div {
+  width: 46px;
+  height: 46px;
+  margin-left: 8px;
+  margin-top: 8px;
+  background: linear-gradient(135deg, #2563eb, #4338ca);
+}
+
+.service-point-cluster.service-point-cluster--large {
+  background: rgba(67, 56, 202, 0.2);
+}
+
+.service-point-cluster.service-point-cluster--large div {
+  width: 54px;
+  height: 54px;
+  margin-left: 10px;
+  margin-top: 10px;
+  background: linear-gradient(135deg, #4338ca, #7c3aed);
+}
+
 .leaflet-div-icon.leaflet-editing-icon {
   width: 10px !important;
   height: 10px !important;
