@@ -333,13 +333,19 @@ button:disabled {
 .constraint-point-icon {
   width: 14px;
   height: 14px;
+}
+
+.constraint-point-icon__inner {
+  display: block;
+  width: 14px;
+  height: 14px;
   border-radius: 999px;
-  border: 2px solid #f59e0b;
+  border: 2px solid var(--constraint-color, #64748b);
   background:
     repeating-linear-gradient(
       135deg,
-      rgba(245, 158, 11, 0.95) 0 3px,
-      rgba(120, 53, 15, 0.88) 3px 6px
+      color-mix(in srgb, var(--constraint-color, #64748b) 88%, white) 0 3px,
+      color-mix(in srgb, var(--constraint-color, #64748b) 45%, black) 3px 6px
     );
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8);
 }

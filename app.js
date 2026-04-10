@@ -5,8 +5,6 @@ const PINCODE_COLORS = ["#59c3c3", "#f4a261", "#90be6d", "#f8961e", "#43aa8b", "
 const CUSTOM_COLORS = ["#ef476f", "#9b5de5", "#f15bb5", "#fee440", "#00bbf9", "#00f5d4"];
 const SERVICE_BORDER_COLOR = "#0f766e";
 const GUIDE_BORDER_COLOR = "#64748b";
-const CONSTRAINT_BORDER_COLOR = "#f59e0b";
-const CONSTRAINT_FILL_COLOR = "#f97316";
 const SELECTION_COLOR = "#0ea5e9";
 const PINCODE_PROPERTY_KEYS = [
   "pincode",
@@ -924,11 +922,14 @@ function renderConstraintCells(bounds, mode) {
   }
 
   state.constraintCells.forEach((cell) => {
+    const zoneColor = getZoneColorForCell(cell);
+
     if (mode === "boundary") {
       const [lat, lng] = h3.cellToLatLng(cell);
       const marker = L.marker([lat, lng], {
         icon: L.divIcon({
           className: "constraint-point-icon",
+          html: `<span class="constraint-point-icon__inner" style="--constraint-color: ${zoneColor};"></span>`,
           iconSize: [14, 14],
           iconAnchor: [7, 7],
           popupAnchor: [0, -10],
@@ -951,9 +952,9 @@ function renderConstraintCells(bounds, mode) {
     latLngs.forEach((point) => bounds?.push(point));
 
     const polygon = L.polygon(latLngs, {
-      color: CONSTRAINT_BORDER_COLOR,
+      color: zoneColor,
       weight: mode === "hex" ? 1.4 : 1.8,
-      fillColor: CONSTRAINT_FILL_COLOR,
+      fillColor: zoneColor,
       fillOpacity: mode === "hex" ? 0.14 : 0.12,
       dashArray: "4 6",
       className: "constraint-cell",
@@ -967,11 +968,11 @@ function renderConstraintCells(bounds, mode) {
       renderSelectedCell();
     });
     polygon.addTo(constraintLayer);
-    renderConstraintPattern(latLngs);
+    renderConstraintPattern(latLngs, zoneColor);
   });
 }
 
-function renderConstraintPattern(latLngs) {
+function renderConstraintPattern(latLngs, zoneColor) {
   if (latLngs.length < 4) {
     return;
   }
@@ -1043,7 +1044,7 @@ function renderConstraintPattern(latLngs) {
     const endLatLng = map.layerPointToLatLng(uniqueIntersections[uniqueIntersections.length - 1]);
 
     L.polyline([startLatLng, endLatLng], {
-      color: "#78350f",
+      color: zoneColor,
       weight: 1.25,
       opacity: 0.95,
       interactive: false,
@@ -1441,6 +1442,13 @@ function getCellOwnerMap() {
   });
 
   return ownerByCell;
+}
+
+function getZoneColorForCell(cell) {
+  const ownerByCell = getCellOwnerMap();
+  const ownerId = ownerByCell.get(cell);
+  const zone = state.workingZones.find((item) => item.id === ownerId);
+  return zone?.color || GUIDE_BORDER_COLOR;
 }
 
 function getConnectedCellComponents(cells) {
