@@ -972,17 +972,34 @@ function renderConstraintCells(bounds, mode) {
 }
 
 function renderConstraintPattern(latLngs) {
-  const pointCount = latLngs.length;
-
-  if (pointCount < 4) {
+  if (latLngs.length < 4) {
     return;
   }
 
-  const offset = Math.floor(pointCount / 2);
+  const bounds = latLngs.reduce(
+    (acc, point) => ({
+      minLat: Math.min(acc.minLat, point.lat),
+      maxLat: Math.max(acc.maxLat, point.lat),
+      minLng: Math.min(acc.minLng, point.lng),
+      maxLng: Math.max(acc.maxLng, point.lng),
+    }),
+    {
+      minLat: Number.POSITIVE_INFINITY,
+      maxLat: Number.NEGATIVE_INFINITY,
+      minLng: Number.POSITIVE_INFINITY,
+      maxLng: Number.NEGATIVE_INFINITY,
+    }
+  );
 
-  for (let index = 0; index < offset; index += 1) {
-    const start = latLngs[index];
-    const end = latLngs[(index + offset) % pointCount];
+  const latSpan = bounds.maxLat - bounds.minLat;
+  const lngSpan = bounds.maxLng - bounds.minLng;
+  const stripeCount = 5;
+  const stripeStep = (latSpan + lngSpan) / stripeCount;
+
+  for (let index = -1; index <= stripeCount + 1; index += 1) {
+    const offset = stripeStep * index;
+    const start = L.latLng(bounds.minLat + offset, bounds.minLng);
+    const end = L.latLng(bounds.minLat + offset - latSpan, bounds.maxLng);
 
     L.polyline([start, end], {
       color: "rgba(120, 53, 15, 0.95)",
@@ -990,7 +1007,7 @@ function renderConstraintPattern(latLngs) {
       opacity: 0.9,
       interactive: false,
       bubblingMouseEvents: false,
-      dashArray: "2 4",
+      dashArray: "1 0",
     }).addTo(constraintLayer);
   }
 }
