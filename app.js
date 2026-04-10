@@ -976,77 +976,76 @@ function renderConstraintPattern(latLngs) {
     return;
   }
 
-  const bounds = latLngs.reduce(
+  const points = latLngs.map((point) => map.latLngToLayerPoint(point));
+  const bbox = points.reduce(
     (acc, point) => ({
-      minLat: Math.min(acc.minLat, point.lat),
-      maxLat: Math.max(acc.maxLat, point.lat),
-      minLng: Math.min(acc.minLng, point.lng),
-      maxLng: Math.max(acc.maxLng, point.lng),
+      minX: Math.min(acc.minX, point.x),
+      maxX: Math.max(acc.maxX, point.x),
+      minY: Math.min(acc.minY, point.y),
+      maxY: Math.max(acc.maxY, point.y),
     }),
     {
-      minLat: Number.POSITIVE_INFINITY,
-      maxLat: Number.NEGATIVE_INFINITY,
-      minLng: Number.POSITIVE_INFINITY,
-      maxLng: Number.NEGATIVE_INFINITY,
+      minX: Number.POSITIVE_INFINITY,
+      maxX: Number.NEGATIVE_INFINITY,
+      minY: Number.POSITIVE_INFINITY,
+      maxY: Number.NEGATIVE_INFINITY,
     }
   );
 
-  const latSpan = bounds.maxLat - bounds.minLat;
-  const lngSpan = bounds.maxLng - bounds.minLng;
-  const padding = Math.max(latSpan, lngSpan) * 0.35;
-  const stripeSpacing = (latSpan + lngSpan) / 6;
-  const ring = [...latLngs.map((point) => [point.lng, point.lat]), [latLngs[0].lng, latLngs[0].lat]];
-  const polygon = turf.polygon([ring]);
-  const boundary = turf.lineString(ring);
+  const stripeSpacing = 8;
+  const cMin = bbox.minX + bbox.minY - 24;
+  const cMax = bbox.maxX + bbox.maxY + 24;
 
-  for (
-    let offset = bounds.minLng - (latSpan + padding * 2);
-    offset <= bounds.maxLng + lngSpan + padding * 2;
-    offset += stripeSpacing
-  ) {
-    const line = turf.lineString([
-      [offset, bounds.maxLat + padding],
-      [offset + latSpan + padding * 2, bounds.minLat - padding],
-    ]);
-    const intersections = turf.lineIntersect(line, boundary).features
-      .map((feature) => feature.geometry.coordinates)
-      .reduce((unique, point) => {
-        const key = `${point[0].toFixed(6)}:${point[1].toFixed(6)}`;
-        if (!unique.some((entry) => entry.key === key)) {
-          unique.push({ key, point });
-        }
-        return unique;
-      }, [])
-      .map((entry) => entry.point)
-      .sort((left, right) => left[0] - right[0] || right[1] - left[1]);
+  for (let c = cMin; c <= cMax; c += stripeSpacing) {
+    const intersections = [];
 
-    if (intersections.length < 2) {
-      continue;
-    }
+    for (let index = 0; index < points.length; index += 1) {
+      const start = points[index];
+      const end = points[(index + 1) % points.length];
+      const deltaX = end.x - start.x;
+      const deltaY = end.y - start.y;
+      const denominator = deltaX + deltaY;
 
-    const [startLng, startLat] = intersections[0];
-    const [endLng, endLat] = intersections[intersections.length - 1];
-
-    if (
-      !turf.booleanPointInPolygon(turf.point([startLng + 0.000001, startLat - 0.000001]), polygon) &&
-      !turf.booleanPointInPolygon(turf.point([endLng - 0.000001, endLat + 0.000001]), polygon)
-    ) {
-      continue;
-    }
-
-    L.polyline(
-      [
-        L.latLng(startLat, startLng),
-        L.latLng(endLat, endLng),
-      ],
-      {
-        color: "#78350f",
-        weight: 1.15,
-        opacity: 0.95,
-        interactive: false,
-        bubblingMouseEvents: false,
+      if (Math.abs(denominator) < 0.0001) {
+        continue;
       }
-    ).addTo(constraintLayer);
+
+      const t = (c - start.x - start.y) / denominator;
+      if (t < 0 || t > 1) {
+        continue;
+      }
+
+      intersections.push(L.point(start.x + t * deltaX, start.y + t * deltaY));
+    }
+
+    const uniqueIntersections = intersections.reduce((result, point) => {
+      const exists = result.some(
+        (entry) => Math.abs(entry.x - point.x) < 0.5 && Math.abs(entry.y - point.y) < 0.5
+      );
+
+      if (!exists) {
+        result.push(point);
+      }
+
+      return result;
+    }, []);
+
+    if (uniqueIntersections.length < 2) {
+      continue;
+    }
+
+    uniqueIntersections.sort((left, right) => left.x - right.x || left.y - right.y);
+
+    const startLatLng = map.layerPointToLatLng(uniqueIntersections[0]);
+    const endLatLng = map.layerPointToLatLng(uniqueIntersections[uniqueIntersections.length - 1]);
+
+    L.polyline([startLatLng, endLatLng], {
+      color: "#78350f",
+      weight: 1.25,
+      opacity: 0.95,
+      interactive: false,
+      bubblingMouseEvents: false,
+    }).addTo(constraintLayer);
   }
 }
 
