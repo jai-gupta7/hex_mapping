@@ -926,14 +926,13 @@ function renderConstraintCells(bounds, mode) {
   state.constraintCells.forEach((cell) => {
     if (mode === "boundary") {
       const [lat, lng] = h3.cellToLatLng(cell);
-      const marker = L.circleMarker([lat, lng], {
-        radius: 7,
-        color: CONSTRAINT_BORDER_COLOR,
-        weight: 2,
-        fillColor: CONSTRAINT_FILL_COLOR,
-        fillOpacity: 0.9,
-        dashArray: "3 3",
-        className: "constraint-cell",
+      const marker = L.marker([lat, lng], {
+        icon: L.divIcon({
+          className: "constraint-point-icon",
+          iconSize: [14, 14],
+          iconAnchor: [7, 7],
+          popupAnchor: [0, -10],
+        }),
         bubblingMouseEvents: false,
       });
 
@@ -955,7 +954,7 @@ function renderConstraintCells(bounds, mode) {
       color: CONSTRAINT_BORDER_COLOR,
       weight: mode === "hex" ? 1.4 : 1.8,
       fillColor: CONSTRAINT_FILL_COLOR,
-      fillOpacity: mode === "hex" ? 0.22 : 0.12,
+      fillOpacity: mode === "hex" ? 0.14 : 0.12,
       dashArray: "4 6",
       className: "constraint-cell",
       bubblingMouseEvents: false,
@@ -968,7 +967,32 @@ function renderConstraintCells(bounds, mode) {
       renderSelectedCell();
     });
     polygon.addTo(constraintLayer);
+    renderConstraintPattern(latLngs);
   });
+}
+
+function renderConstraintPattern(latLngs) {
+  const pointCount = latLngs.length;
+
+  if (pointCount < 4) {
+    return;
+  }
+
+  const offset = Math.floor(pointCount / 2);
+
+  for (let index = 0; index < offset; index += 1) {
+    const start = latLngs[index];
+    const end = latLngs[(index + offset) % pointCount];
+
+    L.polyline([start, end], {
+      color: "rgba(120, 53, 15, 0.95)",
+      weight: 1,
+      opacity: 0.9,
+      interactive: false,
+      bubblingMouseEvents: false,
+      dashArray: "2 4",
+    }).addTo(constraintLayer);
+  }
 }
 
 function renderSelectedCell() {
