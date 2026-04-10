@@ -992,9 +992,12 @@ function renderConstraintPattern(latLngs) {
     }
   );
 
-  const stripeSpacing = 8;
-  const cMin = bbox.minX + bbox.minY - 24;
-  const cMax = bbox.maxX + bbox.maxY + 24;
+  const diagonalSpan = (bbox.maxX - bbox.minX) + (bbox.maxY - bbox.minY);
+  const stripeCount = 10;
+  const stripeSpacing = Math.max(3, diagonalSpan / stripeCount);
+  const padding = stripeSpacing * 2;
+  const cMin = bbox.minX + bbox.minY - padding;
+  const cMax = bbox.maxX + bbox.maxY + padding;
 
   for (let c = cMin; c <= cMax; c += stripeSpacing) {
     const intersections = [];
