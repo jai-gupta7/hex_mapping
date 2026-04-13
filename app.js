@@ -94,6 +94,8 @@ const state = {
   parentCells: new Set(),
   selectedPinCodes: [],
   selectedCell: null,
+  selectedLabel: null,
+  activeZoneId: null,
   servicePoints: [],
   constraintCells: [],
   serviceAreaFeature: null,
@@ -342,6 +344,8 @@ function clearZoneState() {
   state.parentCells = new Set();
   state.selectedPinCodes = [];
   state.selectedCell = null;
+  state.selectedLabel = null;
+  state.activeZoneId = null;
   state.servicePoints = [];
   state.constraintCells = [];
   state.serviceAreaFeature = null;
@@ -396,6 +400,8 @@ function generateRandomZones() {
   state.customZones = [...nextZones];
   state.hiddenZoneIds = new Set();
   state.selectedCell = null;
+  state.selectedLabel = null;
+  state.activeZoneId = null;
   renderAllZones();
 
   if (effectiveZoneCount !== requestedZoneCount) {
@@ -542,6 +548,8 @@ function handleDrawnPolygon(layer) {
     state.hiddenZoneIds = new Set(
       [...state.hiddenZoneIds].filter((zoneId) => state.workingZones.some((zone) => zone.id === zoneId))
     );
+    state.activeZoneId = zoneId;
+    state.selectedLabel = `Focused: Custom Zone ${state.customZoneSequence}`;
     renderAllZones();
     showStatus(
       `Created ${parentSelectedCells.length} H3-cell custom zone and rebuilt ${affectedZoneIds.size} affected zone(s).`,
@@ -798,6 +806,7 @@ function restoreZoneState(snapshot) {
 }
 
 function renderAllZones(shouldFitBounds = false) {
+  ensureActiveZoneIsValid();
   drawLayer.clearLayers();
   baseZoneLayer.clearLayers();
   customZoneLayer.clearLayers();
@@ -837,6 +846,42 @@ function renderAllZones(shouldFitBounds = false) {
   if (shouldFitBounds && bounds.length) {
     map.fitBounds(bounds, { padding: [28, 28] });
   }
+}
+
+function ensureActiveZoneIsValid() {
+  if (state.activeZoneId && !state.workingZones.some((zone) => zone.id === state.activeZoneId)) {
+    state.activeZoneId = null;
+  }
+}
+
+function focusZone(zoneId) {
+  if (state.activeZoneId === zoneId) {
+    return;
+  }
+
+  state.activeZoneId = zoneId;
+  const zone = state.workingZones.find((item) => item.id === zoneId);
+  state.selectedLabel = zone ? `Focused: ${zone.label}` : state.selectedLabel;
+  renderAllZones();
+}
+
+function toggleZoneFocus(zoneId) {
+  if (state.activeZoneId === zoneId) {
+    state.activeZoneId = null;
+    state.selectedLabel = null;
+    renderAllZones();
+    return;
+  }
+
+  focusZone(zoneId);
+}
+
+function getZoneVisualState(zoneId) {
+  if (!state.activeZoneId) {
+    return "default";
+  }
+
+  return state.activeZoneId === zoneId ? "active" : "muted";
 }
 
 function renderServiceArea(bounds, mode) {
@@ -880,8 +925,9 @@ function renderPincodeGuides(bounds, mode) {
         featureLayer.bindPopup(buildPincodePopupMarkup(zone));
         featureLayer.on("click", () => {
           state.selectedCell = null;
+          state.selectedLabel = `PIN ${zone.label}`;
           renderSelectedCell();
-          controls.selectedCell.textContent = `PIN ${zone.label}`;
+          updateStats();
         });
       },
     });
@@ -904,6 +950,7 @@ function renderBoundaryModeZones(bounds) {
   state.workingZones
     .filter((zone) => !state.hiddenZoneIds.has(zone.id))
     .forEach((zone) => {
+      const visualState = getZoneVisualState(zone.id);
       const feature = zone.boundaryFeature || zoneCellsToFeature(zone.cells);
       if (!feature) {
         return;
@@ -913,16 +960,17 @@ function renderBoundaryModeZones(bounds) {
         bubblingMouseEvents: false,
         style: {
           color: zone.color,
-          weight: 3,
+          weight: visualState === "active" ? 4.4 : visualState === "muted" ? 2 : 3,
+          opacity: visualState === "muted" ? 0.26 : 0.96,
           fillColor: zone.color,
-          fillOpacity: 0.18,
+          fillOpacity: visualState === "active" ? 0.3 : visualState === "muted" ? 0.05 : 0.18,
         },
         onEachFeature: (_feature, featureLayer) => {
           featureLayer.bindPopup(buildZonePopupMarkup(zone));
           featureLayer.on("click", () => {
             state.selectedCell = null;
-            renderSelectedCell();
-            controls.selectedCell.textContent = zone.label;
+            state.selectedLabel = zone.label;
+            focusZone(zone.id);
           });
         },
       });
@@ -937,6 +985,9 @@ function renderBoundaryModeZones(bounds) {
           bounds.push(layerBounds.getSouthEast());
         }
         drawLayer.addLayer(featureLayer);
+        if (visualState === "active") {
+          featureLayer.bringToFront();
+        }
       });
     });
 
@@ -951,31 +1002,37 @@ function renderHexZones(bounds) {
       return;
     }
 
+    const visualState = getZoneVisualState(zone.id);
     const isCustom = zone.source === "custom";
     const layer = isCustom ? customZoneLayer : baseZoneLayer;
-    const fillOpacity = isCustom ? 0.5 : zone.source === "derived" ? 0.24 : 0.14;
-    renderCells(zone.cells, zone.color, layer, zone.label, fillOpacity, bounds);
+    const baseFillOpacity = isCustom ? 0.5 : zone.source === "derived" ? 0.24 : 0.14;
+    const fillOpacity =
+      visualState === "active" ? Math.min(baseFillOpacity + 0.16, 0.72) : visualState === "muted" ? 0.035 : baseFillOpacity;
+    const lineOpacity = visualState === "muted" ? 0.18 : 0.95;
+    const lineWeight = visualState === "active" ? 1.8 : 1;
+    renderCells(zone, layer, fillOpacity, lineOpacity, lineWeight, bounds);
   });
 }
 
-function renderCells(cells, color, layerGroup, label, fillOpacity, bounds) {
-  cells.forEach((cell) => {
+function renderCells(zone, layerGroup, fillOpacity, lineOpacity, lineWeight, bounds) {
+  zone.cells.forEach((cell) => {
     const latLngs = h3.cellToBoundary(cell);
     latLngs.forEach((point) => bounds?.push(point));
 
     const polygon = L.polygon(latLngs, {
-      color,
-      weight: 1,
-      fillColor: color,
+      color: zone.color,
+      opacity: lineOpacity,
+      weight: lineWeight,
+      fillColor: zone.color,
       fillOpacity,
       bubblingMouseEvents: false,
     });
 
-    polygon.bindPopup(buildPopupMarkup(label, cell));
+    polygon.bindPopup(buildPopupMarkup(zone.label, cell));
     polygon.on("click", () => {
       state.selectedCell = cell;
-      controls.selectedCell.textContent = cell;
-      renderSelectedCell();
+      state.selectedLabel = cell;
+      focusZone(zone.id);
     });
     polygon.addTo(layerGroup);
   });
@@ -987,11 +1044,14 @@ function renderConstraintCells(bounds, mode) {
   }
 
   state.constraintCells.forEach((cell) => {
-    const zoneColor = getZoneColorForCell(cell);
+    const ownerZone = getZoneForCell(cell);
+    const zoneColor = ownerZone?.color || GUIDE_BORDER_COLOR;
+    const isMuted = getZoneVisualState(ownerZone?.id) === "muted";
 
     if (mode === "boundary") {
       const [lat, lng] = h3.cellToLatLng(cell);
       const marker = L.marker([lat, lng], {
+        opacity: isMuted ? 0.2 : 1,
         icon: L.divIcon({
           className: "constraint-point-icon",
           html: `<span class="constraint-point-icon__inner" style="--constraint-color: ${zoneColor};"></span>`,
@@ -1006,8 +1066,9 @@ function renderConstraintCells(bounds, mode) {
       marker.bindPopup(buildConstraintPopupMarkup(cell));
       marker.on("click", () => {
         state.selectedCell = cell;
-        controls.selectedCell.textContent = `${cell} (constraint)`;
+        state.selectedLabel = `${cell} (constraint)`;
         renderSelectedCell();
+        updateStats();
       });
       marker.addTo(constraintLayer);
       return;
@@ -1018,9 +1079,10 @@ function renderConstraintCells(bounds, mode) {
 
     const polygon = L.polygon(latLngs, {
       color: zoneColor,
+      opacity: isMuted ? 0.18 : 0.95,
       weight: mode === "hex" ? 1.4 : 1.8,
       fillColor: zoneColor,
-      fillOpacity: mode === "hex" ? 0.14 : 0.12,
+      fillOpacity: isMuted ? 0.03 : mode === "hex" ? 0.14 : 0.12,
       dashArray: "4 6",
       className: "constraint-cell",
       bubblingMouseEvents: false,
@@ -1029,11 +1091,12 @@ function renderConstraintCells(bounds, mode) {
     polygon.bindPopup(buildConstraintPopupMarkup(cell));
     polygon.on("click", () => {
       state.selectedCell = cell;
-      controls.selectedCell.textContent = `${cell} (constraint)`;
+      state.selectedLabel = `${cell} (constraint)`;
       renderSelectedCell();
+      updateStats();
     });
     polygon.addTo(constraintLayer);
-    renderConstraintPattern(latLngs, zoneColor);
+    renderConstraintPattern(latLngs, zoneColor, isMuted ? 0.22 : 0.95);
   });
 }
 
@@ -1041,8 +1104,11 @@ function renderServicePoints() {
   pointClusterLayer.clearLayers();
 
   state.servicePoints.forEach((point, index) => {
+    const ownerZone = getZoneForCell(point.cell);
+    const isMuted = getZoneVisualState(ownerZone?.id) === "muted";
     const marker = L.marker([point.lat, point.lng], {
       bubblingMouseEvents: false,
+      opacity: isMuted ? 0.22 : 1,
       icon: L.divIcon({
         className: "service-point-icon",
         html: '<span class="service-point-icon__inner"></span>',
@@ -1055,14 +1121,15 @@ function renderServicePoints() {
     marker.bindPopup(buildServicePointPopupMarkup(point, index + 1));
     marker.on("click", () => {
       state.selectedCell = null;
-      controls.selectedCell.textContent = `Service point ${index + 1}`;
+      state.selectedLabel = `Service point ${index + 1}`;
       renderSelectedCell();
+      updateStats();
     });
     pointClusterLayer.addLayer(marker);
   });
 }
 
-function renderConstraintPattern(latLngs, zoneColor) {
+function renderConstraintPattern(latLngs, zoneColor, lineOpacity = 0.95) {
   if (latLngs.length < 4) {
     return;
   }
@@ -1136,7 +1203,7 @@ function renderConstraintPattern(latLngs, zoneColor) {
     L.polyline([startLatLng, endLatLng], {
       color: zoneColor,
       weight: 1.25,
-      opacity: 0.95,
+      opacity: lineOpacity,
       interactive: false,
       bubblingMouseEvents: false,
     }).addTo(constraintLayer);
@@ -1599,6 +1666,7 @@ function renderRadiusCircle() {
 }
 
 function updateStats() {
+  ensureActiveZoneIsValid();
   controls.datasetName.textContent = state.datasetName;
   controls.mapViewLabel.textContent = getMapViewLabel();
   controls.radiusLabel.textContent = state.radiusKm ? `${state.radiusKm} km` : "-";
@@ -1607,7 +1675,7 @@ function updateStats() {
   controls.customZoneCount.textContent = String(state.customZones.length);
   controls.mappedPointCount.textContent = String(state.servicePoints.length);
   controls.constraintCellCount.textContent = String(state.constraintCells.length);
-  controls.selectedCell.textContent = state.selectedCell || "Click a zone or cell";
+  controls.selectedCell.textContent = state.selectedLabel || state.selectedCell || "Click a zone or cell";
   controls.zoneList.innerHTML = "";
 
   state.workingZones.forEach((zone) => {
@@ -1619,14 +1687,35 @@ function appendZoneListItem(zone) {
   const row = document.createElement("p");
   row.className = "zone-chip";
   const isHidden = state.hiddenZoneIds.has(zone.id);
+  const isActive = state.activeZoneId === zone.id;
   row.style.setProperty("--zone-color", zone.color);
   row.classList.toggle("is-hidden", isHidden);
+  row.classList.toggle("is-active", isActive);
 
   const label = document.createElement("span");
   label.textContent = `${zone.label} (${getZoneSourceLabel(zone.source)})`;
+  label.className = "zone-chip-label";
+  label.addEventListener("click", () => {
+    state.selectedCell = null;
+    state.selectedLabel = zone.label;
+    toggleZoneFocus(zone.id);
+  });
 
   const cells = document.createElement("span");
   cells.textContent = `${zone.cells.length} cells`;
+
+  const actions = document.createElement("span");
+  actions.className = "zone-chip-actions";
+
+  const focusButton = document.createElement("button");
+  focusButton.type = "button";
+  focusButton.className = `zone-chip-button${isActive ? " is-active" : ""}`;
+  focusButton.textContent = isActive ? "Focused" : "Focus";
+  focusButton.addEventListener("click", () => {
+    state.selectedCell = null;
+    state.selectedLabel = zone.label;
+    toggleZoneFocus(zone.id);
+  });
 
   const toggleWrap = document.createElement("label");
   toggleWrap.className = "zone-chip-toggle";
@@ -1645,7 +1734,8 @@ function appendZoneListItem(zone) {
   });
 
   toggleWrap.append(toggle, toggleText);
-  row.append(label, cells, toggleWrap);
+  actions.append(focusButton, toggleWrap);
+  row.append(label, cells, actions);
   controls.zoneList.appendChild(row);
 }
 
@@ -1862,6 +1952,10 @@ function setZoneVisibility(zoneId, isVisible) {
     state.hiddenZoneIds.delete(zoneId);
   } else {
     state.hiddenZoneIds.add(zoneId);
+    if (state.activeZoneId === zoneId) {
+      state.activeZoneId = null;
+      state.selectedLabel = null;
+    }
   }
 
   renderAllZones();
